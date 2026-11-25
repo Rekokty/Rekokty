@@ -1,0 +1,510 @@
+<meta charset="utf-8">
+<title>Wspólny Jadłospis</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Układ: wąski nagłówek, przyklejone trzy zakładki, pod nimi jedna kolumna na telefonie i siatka dni na szerokim ekranie. */
+:root{
+  --bg:#F1F4EF; --surface:#FFFFFF; --ink:#1B2620; --muted:#5C6A62; --line:#D8DFD7;
+  --beet:#A0174F; --beet-soft:#F7E4EC; --on-beet:#FFFFFF;
+  --leaf:#2B774A; --leaf-soft:#DFF0E4; --warn:#8A5A00; --warn-soft:#FBEFD2;
+  --display:"Bricolage Grotesque","Trebuchet MS",system-ui,sans-serif;
+  --body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131915; --surface:#1C2420; --ink:#E8EEE9; --muted:#9BA9A0; --line:#2E3A33;
+    --beet:#F27AAA; --beet-soft:#3B1D2B; --on-beet:#22060F;
+    --leaf:#72C893; --leaf-soft:#1C3326; --warn:#F0C566; --warn-soft:#3A2F12;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131915; --surface:#1C2420; --ink:#E8EEE9; --muted:#9BA9A0; --line:#2E3A33;
+  --beet:#F27AAA; --beet-soft:#3B1D2B; --on-beet:#22060F;
+  --leaf:#72C893; --leaf-soft:#1C3326; --warn:#F0C566; --warn-soft:#3A2F12;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45;margin:0}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.wrap{max-width:1120px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header .wrap{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;padding-block:20px 10px}
+h1{font-family:var(--display);font-weight:700;font-size:1.7rem;letter-spacing:-.02em;margin:0;line-height:1.1}
+h1 span{color:var(--beet)}
+.pill{font-size:.78rem;font-weight:600;padding:3px 10px;border-radius:99px;background:var(--leaf-soft);color:var(--leaf)}
+.pill.local{background:var(--warn-soft);color:var(--warn)}
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;gap:4px}
+nav button{flex:1;max-width:200px;font:600 .98rem var(--body);color:var(--muted);background:none;border:0;border-bottom:3px solid transparent;padding:12px 6px 9px;cursor:pointer}
+nav button[aria-selected="true"]{color:var(--beet);border-bottom-color:var(--beet)}
+main.wrap{padding-block:18px 60px;display:flex;flex-direction:column;gap:16px}
+button,input,select{font-family:inherit}
+:focus-visible{outline:2px solid var(--beet);outline-offset:2px}
+.btn{font:600 .95rem var(--body);border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:10px 16px;cursor:pointer}
+.btn.primary{background:var(--beet);border-color:var(--beet);color:var(--on-beet)}
+.btn.small{padding:6px 12px;font-size:.86rem}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.note{background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:10px 14px;font-size:.92rem}
+.muted{color:var(--muted)}
+.small{font-size:.86rem}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.spread{justify-content:space-between}
+h2{font-family:var(--display);font-size:1.25rem;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0;font-weight:700}
+
+/* Jadłospis */
+.days{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:14px;align-items:start}
+.day{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0;overflow:hidden}
+.day>header{padding:12px 14px 8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.day>header b{font-family:var(--display);font-size:1.08rem;text-transform:capitalize}
+.meal{border-top:1px solid var(--line)}
+.meal summary{list-style:none;cursor:pointer;padding:10px 14px;display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:baseline}
+.meal summary::-webkit-details-marker{display:none}
+.meal .slot{grid-column:1/-1;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--beet);font-weight:700}
+.meal .name{font-weight:600;min-width:0}
+.meal .chev{color:var(--muted);font-size:.8rem;transition:transform .15s}
+.meal[open] .chev{transform:rotate(180deg)}
+.meal .body{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.9rem;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:5px 0 5px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{text-align:left;padding-left:0;white-space:normal}
+th{font-size:.74rem;color:var(--muted);font-weight:600}
+.day>footer{border-top:1px solid var(--line);padding:9px 14px;font-size:.82rem;color:var(--muted);display:flex;flex-direction:column;gap:2px;font-variant-numeric:tabular-nums}
+.day>footer b{color:var(--ink);font-weight:600}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:var(--r);padding:28px 20px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+
+/* Zakupy */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--leaf);border-radius:99px;transition:width .2s}
+.cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;align-items:start}
+.items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.items li{display:flex;align-items:center;gap:10px;border-top:1px solid var(--line);min-height:44px}
+.items li:first-child{border-top:0}
+.items label{flex:1;display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer;min-width:0}
+.items input[type=checkbox]{width:20px;height:20px;accent-color:var(--leaf);flex:none}
+.items .n{flex:1;min-width:0;overflow-wrap:anywhere}
+.items .q{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.92rem}
+.items li.done .n{text-decoration:line-through;color:var(--muted)}
+.x{border:0;background:none;color:var(--muted);font-size:1.2rem;line-height:1;padding:8px;cursor:pointer;border-radius:8px}
+input[type=text],input[type=number],input[type=date],select{font-size:1rem;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-width:0}
+.grow{flex:1 1 160px}
+
+/* Ustawienia */
+.form{display:flex;flex-direction:column;gap:18px;max-width:640px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>span{font-weight:600;font-size:.92rem}
+.person{display:flex;gap:8px;align-items:center}
+.person input[type=number]{width:104px}
+.checks{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 13px;font-size:.92rem;cursor:pointer}
+.chip input{accent-color:var(--beet)}
+.chip.on{background:var(--beet-soft);border-color:var(--beet);color:var(--beet)}
+.chip button{border:0;background:none;color:inherit;font-size:1rem;cursor:pointer;padding:0 0 0 2px}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(18px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:.92rem;max-width:calc(100% - 32px);z-index:20}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header><div class="wrap">
+  <h1>Wspólny <span>Jadłospis</span></h1>
+  <span class="pill" id="status">Łączenie…</span>
+</div></header>
+<nav><div class="wrap" role="tablist">
+  <button role="tab" data-tab="plan" id="tab-plan">Jadłospis</button>
+  <button role="tab" data-tab="zakupy" id="tab-zakupy">Zakupy</button>
+  <button role="tab" data-tab="dieta" id="tab-dieta">Dieta i osoby</button>
+</div></nav>
+<main class="wrap" id="view"></main>
+<div id="toast" hidden role="status"></div>
+
+<script>
+"use strict";
+/* ---------- Baza składników: [nazwa, kategoria, kcal, białko, tłuszcz, węglowodany na 100 g, cechy, jednostka, gramy na sztukę] ----------
+   cechy: m = mięso/ryba, g = gluten, d = laktoza */
+const ING={
+  owies:["Płatki owsiane","z",370,13,7,60,"g"],
+  jaglana:["Kasza jaglana","z",350,11,3.5,69,""],
+  gryczana:["Kasza gryczana","z",345,12.6,3.1,69,""],
+  ryz:["Ryż","z",350,7.5,0.8,77,""],
+  makaron:["Makaron pełnoziarnisty","z",350,13,2.5,66,"g"],
+  chleb:["Chleb żytni razowy","z",230,6,1.5,45,"g"],
+  grahamka:["Bułka grahamka","z",260,9,2,50,"g","szt",60],
+  tortilla:["Tortilla pełnoziarnista","z",300,9,7,48,"g","szt",60],
+  chlebbg:["Chleb bezglutenowy","z",250,4,5,46,""],
+  wafle:["Wafle ryżowe","z",385,8,3,80,"","szt",9],
+  mleko:["Mleko 2%","n",50,3.4,2,4.8,"d","ml"],
+  jogurt:["Jogurt naturalny","n",61,4.3,2,6.2,"d"],
+  skyr:["Skyr naturalny","n",64,12,0,4,"d"],
+  twarog:["Twaróg półtłusty","n",133,18.7,4.7,3.7,"d"],
+  feta:["Ser feta","n",264,14,21,4,"d"],
+  maslo:["Masło","n",735,0.7,82,0.7,"d"],
+  jajka:["Jajka","n",140,12.5,9.7,0.6,"","szt",55],
+  kurczak:["Pierś z kurczaka","m",110,23,1.5,0,"m"],
+  indyk:["Mięso mielone z indyka","m",120,21,4,0,"m"],
+  wolowina:["Wołowina mielona chuda","m",170,20,10,0,"m"],
+  szynka:["Szynka drobiowa","m",100,19,2,1.5,"m"],
+  losos:["Filet z łososia","m",200,20,13,0,"m"],
+  dorsz:["Filet z dorsza","m",80,18,0.7,0,"m"],
+  tunczyk:["Tuńczyk w sosie własnym","m",110,25,1,0,"m"],
+  tofu:["Tofu naturalne","s",125,13,7.5,2,""],
+  ciecierzyca:["Ciecierzyca z puszki","s",120,7,2.5,16,""],
+  fasola:["Fasola czerwona z puszki","s",105,7.5,0.6,15,""],
+  soczewica:["Soczewica czerwona","s",340,25,1.5,55,""],
+  hummus:["Hummus","s",250,7,18,12,""],
+  pomidorypuszka:["Pomidory krojone z puszki","s",22,1.2,0.2,3.8,""],
+  kukurydza:["Kukurydza z puszki","s",80,2.5,1,15,""],
+  kokos:["Mleczko kokosowe","s",190,2,19,3,"","ml"],
+  migdalowy:["Napój migdałowy","s",25,0.5,1.1,3,"","ml"],
+  orzechy:["Orzechy włoskie","s",650,15,65,7,""],
+  migdaly:["Migdały","s",600,21,50,9,""],
+  maslorz:["Masło orzechowe","s",600,25,50,12,""],
+  chia:["Nasiona chia","s",480,17,31,8,""],
+  miod:["Miód","s",320,0,0,80,""],
+  oliwa:["Oliwa z oliwek","s",884,0,100,0,"","ml"],
+  czekolada:["Gorzka czekolada","s",550,7,40,35,""],
+  pomidory:["Pomidory","w",19,0.9,0.2,3.5,""],
+  ogorek:["Ogórki","w",14,0.7,0.1,2.5,""],
+  papryka:["Papryka czerwona","w",30,1,0.3,6,""],
+  cebula:["Cebula","w",35,1.2,0.1,7,""],
+  marchew:["Marchew","w",35,0.9,0.2,7.5,""],
+  brokul:["Brokuł","w",30,3,0.4,4,""],
+  szpinak:["Szpinak świeży","w",22,2.9,0.4,1.5,""],
+  cukinia:["Cukinia","w",17,1.2,0.3,3,""],
+  salata:["Mix sałat","w",16,1.3,0.2,2,""],
+  pieczarki:["Pieczarki","w",22,3,0.3,1,""],
+  ziemniaki:["Ziemniaki","w",77,2,0.1,17,""],
+  bataty:["Bataty","w",86,1.6,0.1,20,""],
+  awokado:["Awokado","w",160,2,15,4,"","szt",140],
+  banan:["Banany","w",95,1,0.3,22,"","szt",120],
+  jablko:["Jabłka","w",50,0.4,0.4,11,"","szt",180],
+  owoce:["Owoce jagodowe (świeże lub mrożone)","w",50,1,0.5,9,""]
+};
+const CATS=[["w","Warzywa i owoce"],["n","Nabiał i jajka"],["m","Mięso i ryby"],["z","Pieczywo i zboża"],["s","Spiżarnia"]];
+const SLOTS=[["S","Śniadanie",.25],["O","Obiad",.35],["P","Przekąska",.15],["K","Kolacja",.25]];
+
+/* ---------- Przepisy: ilości na jedną porcję bazową, program przelicza je na kalorie każdej osoby ---------- */
+const RECIPES=[
+ ["s1","S","Owsianka z bananem i orzechami",{owies:60,mleko:250,banan:120,orzechy:15},"Płatki gotuj w mleku 5 minut. Dodaj pokrojonego banana i posiekane orzechy."],
+ ["s2","S","Jajecznica z pomidorami i chlebem razowym",{jajka:165,pomidory:150,chleb:70,maslo:5},"Jajka usmaż na maśle, pod koniec dodaj pokrojone pomidory. Podaj z chlebem."],
+ ["s3","S","Kanapki z twarogiem i ogórkiem",{chleb:100,twarog:100,jogurt:30,ogorek:100},"Twaróg rozgnieć z jogurtem, dopraw. Nałóż na chleb, ułóż plastry ogórka."],
+ ["s4","S","Jaglanka z jabłkiem i migdałami",{jaglana:60,migdalowy:250,jablko:180,migdaly:15,miod:10},"Kaszę przepłucz wrzątkiem i gotuj w napoju migdałowym 15 minut. Dodaj starte jabłko, migdały i miód."],
+ ["s5","S","Omlet ze szpinakiem i pieczarkami",{jajka:165,szpinak:60,pieczarki:100,oliwa:5,chlebbg:60},"Pieczarki podsmaż na oliwie, dodaj szpinak, zalej roztrzepanymi jajkami i smaż pod przykryciem. Podaj z pieczywem."],
+ ["s6","S","Tosty z awokado i jajkiem",{chleb:80,awokado:70,jajka:110,pomidory:100},"Chleb opiecz, posmaruj rozgniecionym awokado. Na wierzch połóż jajka sadzone lub na twardo i pomidora."],
+ ["s7","S","Skyr z owocami i płatkami",{skyr:200,owoce:100,owies:40,miod:10},"Skyr wymieszaj z płatkami, dodaj owoce i polej miodem."],
+ ["s8","S","Pudding chia z owocami",{chia:35,migdalowy:250,owoce:100,miod:10,migdaly:15},"Chia zalej napojem migdałowym, wymieszaj i odstaw na noc do lodówki. Rano dodaj owoce, miód i migdały."],
+ ["s9","S","Kanapki z szynką drobiową i warzywami",{grahamka:120,szynka:60,maslo:10,salata:20,pomidory:100},"Bułki posmaruj masłem, ułóż sałatę, szynkę i plastry pomidora."],
+ ["s10","S","Tofucznica z papryką",{tofu:180,papryka:100,cebula:40,oliwa:5,chlebbg:60},"Cebulę i paprykę podsmaż na oliwie, dodaj rozdrobnione widelcem tofu, dopraw kurkumą i solą. Podaj z pieczywem."],
+ ["o1","O","Kurczak z ryżem i brokułem",{kurczak:150,ryz:70,brokul:200,oliwa:10},"Kurczaka pokrój, dopraw i usmaż na oliwie. Ryż ugotuj, brokuł ugotuj na parze 5 minut."],
+ ["o2","O","Pieczony łosoś z ziemniakami i sałatką",{losos:140,ziemniaki:300,salata:50,ogorek:100,oliwa:10},"Łososia piecz 15 minut w 200°C. Ziemniaki ugotuj. Sałatę i ogórka skrop oliwą."],
+ ["o3","O","Makaron z indykiem w sosie pomidorowym",{makaron:80,indyk:120,pomidorypuszka:200,cebula:50,oliwa:5},"Cebulę i mięso podsmaż na oliwie, dodaj pomidory i duś 15 minut. Wymieszaj z ugotowanym makaronem."],
+ ["o4","O","Chili z wołowiną i fasolą",{wolowina:120,fasola:120,pomidorypuszka:200,papryka:80,cebula:50,ryz:60},"Podsmaż cebulę, mięso i paprykę. Dodaj pomidory, fasolę, kumin i chili, duś 20 minut. Podaj z ryżem."],
+ ["o5","O","Curry z ciecierzycą i szpinakiem",{ciecierzyca:150,kokos:80,pomidorypuszka:150,szpinak:80,cebula:50,ryz:70},"Cebulę zeszklij z curry, dodaj pomidory, mleczko i ciecierzycę. Gotuj 10 minut, na koniec wmieszaj szpinak. Podaj z ryżem."],
+ ["o6","O","Dal z soczewicy z batatem",{soczewica:70,bataty:200,kokos:60,pomidorypuszka:150,cebula:50,ryz:40},"Cebulę zeszklij, dodaj batat w kostce, soczewicę, pomidory, mleczko i szklankę wody. Gotuj 20 minut. Podaj z ryżem."],
+ ["o7","O","Dorsz z kaszą gryczaną i marchewką",{dorsz:180,gryczana:70,marchew:150,maslo:10},"Dorsza usmaż lub upiecz. Kaszę ugotuj. Marchew podduś na maśle do miękkości."],
+ ["o8","O","Makaron z cukinią, fetą i pomidorami",{makaron:90,cukinia:200,feta:60,pomidory:150,oliwa:10},"Cukinię podsmaż na oliwie, dodaj pomidory. Wymieszaj z makaronem i pokruszoną fetą."],
+ ["o9","O","Tofu z warzywami z patelni i ryżem",{tofu:180,brokul:150,papryka:100,marchew:80,ryz:70,oliwa:10},"Tofu w kostce obsmaż na złoto. Dodaj warzywa i smaż 6 minut, dopraw sosem tamari. Podaj z ryżem."],
+ ["o10","O","Pieczony kurczak z batatami",{kurczak:150,bataty:250,salata:50,pomidory:100,oliwa:10},"Kurczaka i bataty w kawałkach skrop oliwą, dopraw papryką i piecz 30 minut w 200°C. Podaj z sałatą i pomidorem."],
+ ["o11","O","Kaszotto gryczane z pieczarkami",{gryczana:80,pieczarki:250,cebula:60,szpinak:60,oliwa:10,orzechy:15},"Cebulę i pieczarki podsmaż, dodaj ugotowaną kaszę i szpinak. Posyp orzechami."],
+ ["o12","O","Miska burrito z fasolą i awokado",{ryz:70,fasola:150,kukurydza:80,awokado:70,pomidory:150,salata:40},"Ryż ugotuj. W misce ułóż ryż, podgrzaną fasolę, kukurydzę, pokrojone awokado, pomidory i sałatę."],
+ ["k1","K","Sałatka grecka z pieczywem",{pomidory:200,ogorek:150,papryka:80,feta:80,oliwa:10,chleb:60},"Warzywa pokrój w kostkę, dodaj fetę, skrop oliwą i posyp oregano. Podaj z chlebem."],
+ ["k2","K","Sałatka z tuńczykiem i jajkiem",{tunczyk:120,jajka:55,kukurydza:80,salata:80,ogorek:100,oliwa:10,chlebbg:50},"Jajko ugotuj na twardo. Wymieszaj sałatę, ogórka, kukurydzę i tuńczyka, skrop oliwą. Podaj z pieczywem."],
+ ["k3","K","Tortilla z kurczakiem i warzywami",{tortilla:120,kurczak:100,salata:40,papryka:80,jogurt:50},"Kurczaka usmaż w paskach. Na tortilli rozsmaruj jogurt, ułóż sałatę, paprykę i kurczaka, zwiń."],
+ ["k4","K","Zupa krem z pomidorów i soczewicy",{pomidorypuszka:300,soczewica:50,marchew:80,cebula:50,oliwa:5,chlebbg:60},"Cebulę i marchew podsmaż, dodaj pomidory, soczewicę i szklankę wody. Gotuj 20 minut i zmiksuj. Podaj z pieczywem."],
+ ["k5","K","Sałatka z ciecierzycą i awokado",{ciecierzyca:150,awokado:70,pomidory:150,ogorek:100,salata:50,oliwa:10},"Wszystkie składniki pokrój i wymieszaj, skrop oliwą i sokiem z cytryny."],
+ ["k6","K","Kanapki z hummusem i warzywami",{chleb:100,hummus:60,papryka:80,ogorek:80},"Chleb posmaruj hummusem, ułóż paski papryki i plastry ogórka."],
+ ["k7","K","Twarożek z warzywami i pieczywem",{twarog:150,jogurt:50,ogorek:100,pomidory:100,chleb:70},"Twaróg wymieszaj z jogurtem i pokrojonym ogórkiem, dopraw. Podaj z pomidorem i chlebem."],
+ ["k8","K","Sałatka z kurczakiem i awokado",{kurczak:120,awokado:70,salata:80,pomidory:150,oliwa:10,chlebbg:50},"Kurczaka usmaż i pokrój. Wymieszaj z sałatą, pomidorami i awokado, skrop oliwą. Podaj z pieczywem."],
+ ["k9","K","Frittata z cukinią i papryką",{jajka:165,cukinia:150,papryka:80,oliwa:5,salata:40},"Warzywa podsmaż na oliwie, zalej roztrzepanymi jajkami i smaż pod przykryciem 8 minut. Podaj z sałatą."],
+ ["k10","K","Kasza jaglana z pieczonymi warzywami i tofu",{jaglana:60,tofu:100,cukinia:150,papryka:100,oliwa:10},"Warzywa i tofu w kostce skrop oliwą i piecz 20 minut w 200°C. Wymieszaj z ugotowaną kaszą."],
+ ["p1","P","Jogurt z orzechami i miodem",{jogurt:200,orzechy:20,miod:10},"Jogurt posyp orzechami i polej miodem."],
+ ["p2","P","Jabłko z masłem orzechowym",{jablko:180,maslorz:20},"Jabłko pokrój w ósemki i maczaj w maśle orzechowym."],
+ ["p3","P","Koktajl bananowy",{banan:120,mleko:250,owies:20},"Zmiksuj wszystkie składniki na gładko."],
+ ["p4","P","Hummus z marchewką",{hummus:60,marchew:150},"Marchew pokrój w słupki i podaj z hummusem."],
+ ["p5","P","Banan i migdały",{banan:120,migdaly:25},"Gotowe od ręki."],
+ ["p6","P","Wafle ryżowe z masłem orzechowym i bananem",{wafle:27,maslorz:20,banan:60},"Wafle posmaruj masłem orzechowym i ułóż plasterki banana."],
+ ["p7","P","Skyr z owocami",{skyr:150,owoce:100},"Skyr wymieszaj z owocami."],
+ ["p8","P","Jabłko, czekolada i orzechy",{jablko:180,czekolada:20,orzechy:20},"Gotowe od ręki."],
+ ["p9","P","Koktajl owocowy z chia",{migdalowy:250,banan:120,owoce:100,chia:10},"Zmiksuj wszystkie składniki na gładko."]
+].map(([id,slot,name,ing,how])=>{
+  let kcal=0,flags="";
+  for(const k in ing){kcal+=ING[k][2]*ing[k]/100;for(const f of ING[k][6])if(!flags.includes(f))flags+=f}
+  return {id,slot,name,ing,how,kcal,flags};
+});
+const R=Object.fromEntries(RECIPES.map(r=>[r.id,r]));
+
+/* ---------- Logika diety ---------- */
+const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
+const todayISO=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
+function defaults(){return{people:[{name:"Osoba 1",kcal:2000},{name:"Osoba 2",kcal:2500}],diet:{noMeat:false,noGluten:false,noLactose:false},exclude:[],nDays:7,start:todayISO()}}
+/* Dane z bazy są współdzielone, więc każdy odczyt przechodzi przez normalizację. */
+function norm(p){
+  if(!p||typeof p!=="object")return null;
+  const d=defaults();
+  const people=(Array.isArray(p.people)?p.people:[]).slice(0,8).map((x,i)=>({name:String(x&&x.name||"Osoba "+(i+1)).slice(0,30),kcal:clamp(Math.round(+(x&&x.kcal))||2000,1000,5000)}));
+  const out={
+    people:people.length?people:d.people,
+    diet:{noMeat:!!(p.diet&&p.diet.noMeat),noGluten:!!(p.diet&&p.diet.noGluten),noLactose:!!(p.diet&&p.diet.noLactose)},
+    exclude:(Array.isArray(p.exclude)?p.exclude:[]).filter(k=>ING[k]),
+    nDays:clamp(Math.round(+p.nDays)||7,1,14),
+    start:/^\d{4}-\d\d-\d\d$/.test(p.start)?p.start:d.start,
+    days:[]
+  };
+  for(const day of Array.isArray(p.days)?p.days.slice(0,14):[]){
+    const o={};for(const [s] of SLOTS){const r=R[day&&day[s]];if(r&&r.slot===s)o[s]=r.id}
+    out.days.push(o);
+  }
+  return out;
+}
+function allowed(r,p){
+  if(p.diet.noMeat&&r.flags.includes("m"))return false;
+  if(p.diet.noGluten&&r.flags.includes("g"))return false;
+  if(p.diet.noLactose&&r.flags.includes("d"))return false;
+  return !p.exclude.some(k=>k in r.ing);
+}
+function pick(slot,p,dayIdx,except){
+  const pool=RECIPES.filter(r=>r.slot===slot&&allowed(r,p));
+  if(!pool.length)return null;
+  const used=new Set(p.days.map(d=>d[slot]));
+  const near=new Set([p.days[dayIdx-1]&&p.days[dayIdx-1][slot],p.days[dayIdx+1]&&p.days[dayIdx+1][slot],except]);
+  let c=pool.filter(r=>!used.has(r.id)&&!near.has(r.id));
+  if(!c.length)c=pool.filter(r=>!near.has(r.id));
+  if(!c.length)c=pool.filter(r=>r.id!==except);
+  if(!c.length)c=pool;
+  return c[Math.floor(Math.random()*c.length)].id;
+}
+/* Buduje jadłospis z ustawień. fresh=false zachowuje dania, które nadal pasują do diety. */
+function buildPlan(settings,old,fresh){
+  const p={...settings,days:[]};
+  for(const [s,label] of SLOTS)if(!RECIPES.some(r=>r.slot===s&&allowed(r,p)))return{error:"Przy tych ograniczeniach nie ma żadnego dania na: "+label.toLowerCase()+". Usuń któreś wykluczenie."};
+  for(let i=0;i<p.nDays;i++){
+    const day={};p.days.push(day);
+    for(const [s] of SLOTS){
+      const prev=!fresh&&old&&old.days[i]&&R[old.days[i][s]];
+      if(prev&&allowed(prev,p))day[s]=prev.id;
+    }
+  }
+  for(let i=0;i<p.nDays;i++)for(const [s] of SLOTS)if(!p.days[i][s])p.days[i][s]=pick(s,p,i);
+  return{plan:p};
+}
+const factor=(person,slot,r)=>person.kcal*SLOTS.find(s=>s[0]===slot)[2]/r.kcal;
+const num=(n,d=0)=>n.toLocaleString("pl-PL",{maximumFractionDigits:d});
+function fmtPortion(k,g){
+  const i=ING[k];
+  if(i[7]==="szt"){const n=Math.max(.5,Math.round(g/i[8]*2)/2);return num(n,1)+" szt."}
+  return num(Math.max(5,Math.round(g/5)*5))+" "+(i[7]||"g");
+}
+function fmtShop(k,g){
+  const i=ING[k];
+  if(i[7]==="szt")return Math.max(1,Math.ceil(g/i[8]-.05))+" szt.";
+  const r=Math.ceil(g/10)*10,ml=i[7]==="ml";
+  return r>=1000?num(r/1000,2)+(ml?" l":" kg"):r+(ml?" ml":" g");
+}
+function shopping(p){
+  const t={};
+  for(const day of p.days)for(const [s] of SLOTS){const r=R[day[s]];if(!r)continue;
+    for(const person of p.people){const f=factor(person,s,r);for(const k in r.ing)t[k]=(t[k]||0)+r.ing[k]*f}}
+  return t;
+}
+function dayLabel(p,i){const d=new Date(p.start+"T12:00:00");d.setDate(d.getDate()+i);return d.toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"numeric"})}
+function dayMacros(p,day,person){
+  let b=0,t=0,w=0,kcal=0;
+  for(const [s] of SLOTS){const r=R[day[s]];if(!r)continue;const f=factor(person,s,r);kcal+=r.kcal*f;
+    for(const k in r.ing){const g=r.ing[k]*f/100;b+=ING[k][3]*g;t+=ING[k][4]*g;w+=ING[k][5]*g}}
+  return{kcal,b,t,w};
+}
+
+/* ---------- Magazyn danych: baza współdzielona albo pamięć przeglądarki ---------- */
+const state={plan:null,checks:{},extras:[],ready:false,shared:false,canWrite:true,stale:false};
+let store=null;
+function localStore(){
+  const KEY="wspolny-jadlospis";
+  let d={plan:null,checks:{},extras:[]};
+  try{Object.assign(d,JSON.parse(localStorage.getItem(KEY)||"{}"))}catch(e){}
+  const push=()=>{try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}state.plan=norm(d.plan);state.checks=d.checks||{};state.extras=d.extras||[];state.ready=true;onData()};
+  push();
+  return{
+    setPlan(p){d.plan=p;push()},
+    setCheck(k,v){d.checks={...d.checks,[k]:v};push()},
+    resetChecks(){d.checks={};d.extras=d.extras.map(e=>({...e,done:false}));push()},
+    addExtra(name){d.extras=[...d.extras,{id:"e"+Date.now(),name,done:false,at:Date.now()}];push()},
+    toggleExtra(id,v){d.extras=d.extras.map(e=>e.id===id?{...e,done:v}:e);push()},
+    delExtra(id){d.extras=d.extras.filter(e=>e.id!==id);push()}
+  };
+}
+function dbStore(db){
+  const planRef=db.doc("app/plan"),checksRef=db.doc("app/checks"),extras=db.collection("extras");
+  let q=Promise.resolve(),checksExist=false;
+  const fail=e=>{
+    if(e&&e.code==="invalid_argument"){state.canWrite=false;toast("Nie masz uprawnień do zmian. Poproś właściciela o dostęp do edycji.");paintStatus();render()}
+    else if(e&&e.code==="quota_exceeded")toast("Baza jest pełna. Usuń część ręcznie dodanych pozycji.");
+    else toast("Nie udało się zapisać. Spróbuj ponownie za chwilę.");
+  };
+  const run=fn=>{q=q.then(fn).catch(fail);return q};
+  const timer=setTimeout(()=>{state.stale=true;if(!state.ready){state.ready=true}render()},10000);
+  const fresh=snap=>{if(!snap.metadata.fromCache){clearTimeout(timer);state.stale=false}};
+  const dead=()=>{clearTimeout(timer);state.stale=true;state.ready=true;render()};
+  planRef.onSnapshot(s=>{fresh(s);state.plan=s.exists?norm(s.data()):null;state.ready=true;onData()},dead);
+  checksRef.onSnapshot(s=>{checksExist=s.exists;const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};onData()},dead);
+  extras.onSnapshot(s=>{state.extras=s.docs.map(x=>{const d=x.data()||{};return{id:x.id,name:String(d.name||"").slice(0,80),done:!!d.done,at:+d.at||0}}).sort((a,b)=>a.at-b.at);onData()},dead);
+  return{
+    setPlan(p){run(()=>planRef.set({...p,stamp:Date.now()}))},
+    setCheck(k,v){run(()=>checksExist?checksRef.update({done:{[k]:v}}):checksRef.set({done:{[k]:v}}))},
+    resetChecks(){const ex=state.extras.filter(e=>e.done);run(()=>checksRef.set({done:{}}));for(const e of ex)run(()=>extras.doc(e.id).update({done:false}))},
+    addExtra(name){run(()=>extras.add({name,done:false,at:Date.now()}))},
+    toggleExtra(id,v){run(()=>extras.doc(id).update({done:v}))},
+    delExtra(id){run(()=>extras.doc(id).delete())}
+  };
+}
+async function connect(){
+  let db=null,user=null;
+  try{if(window.claude&&window.claude.use)[db,user]=await Promise.all([window.claude.use("db"),window.claude.use("user")])}catch(e){}
+  if(!db){store=localStore();paintStatus();return}
+  state.shared=true;
+  try{if(user&&(await user.can("data.write"))===false)state.canWrite=false}catch(e){}
+  store=dbStore(db);paintStatus();
+}
+
+/* ---------- Widok ---------- */
+const $=id=>document.getElementById(id);
+function h(tag,props,...kids){
+  const e=document.createElement(tag);
+  for(const k in props||{}){const v=props[k];if(v==null||v===false)continue;
+    if(k==="class")e.className=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);
+    else if(k in e)e[k]=v;else e.setAttribute(k,v)}
+  for(const c of kids.flat(3)){if(c==null||c===false)continue;e.append(c.nodeType?c:document.createTextNode(c))}
+  return e;
+}
+let tab="plan",draft=null,dirty=false,formError="",armed=false;
+const openMeals=new Set();
+let toastTimer;
+function toast(msg){const t=$("toast");t.textContent=msg;t.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.hidden=true,4000)}
+function paintStatus(){
+  const s=$("status");
+  if(!store){s.textContent="Łączenie…";return}
+  s.className="pill"+(state.shared&&state.canWrite?"":" local");
+  s.textContent=!state.shared?"Tylko na tym urządzeniu":state.canWrite?"Wspólne, na żywo":"Tylko podgląd";
+}
+function onData(){if(!dirty)draft=null;render()}
+function setTab(t){tab=["plan","zakupy","dieta"].includes(t)?t:"plan";try{if(location.hash.slice(1)!==tab)history.replaceState(null,"","#"+tab)}catch(e){}render();window.scrollTo(0,0)}
+function render(){
+  for(const b of document.querySelectorAll("nav button"))b.setAttribute("aria-selected",String(b.dataset.tab===tab));
+  const v=$("view"),kids=[];
+  if(!state.ready)kids.push(h("p",{class:"muted"},"Wczytuję wspólne dane…"));
+  else{
+    if(state.stale)kids.push(h("div",{class:"note"},"Nie mogę połączyć się ze wspólnymi danymi. To, co widzisz, może być nieaktualne."));
+    if(state.shared&&!state.canWrite)kids.push(h("div",{class:"note"},"Masz dostęp tylko do podglądu. Aby odhaczać zakupy i zmieniać dietę, poproś właściciela o dostęp do edycji."));
+    kids.push(tab==="plan"?viewPlan():tab==="zakupy"?viewShop():viewDiet());
+  }
+  v.replaceChildren(...kids.flat());
+}
+function emptyState(){
+  return h("div",{class:"empty"},h("h2",null,"Nie ma jeszcze jadłospisu"),
+    h("p",{class:"muted",style:"margin:0"},"Podaj, kto je i ile kalorii potrzebuje, a program ułoży posiłki na cały tydzień i policzy z nich wspólną listę zakupów."),
+    h("button",{class:"btn primary",onclick:()=>setTab("dieta")},"Ustaw dietę i osoby"));
+}
+function viewPlan(){
+  const p=state.plan;if(!p||!p.days.length)return[emptyState()];
+  const w=state.canWrite;
+  const head=h("div",{class:"row spread"},
+    h("div",null,h("h2",null,"Jadłospis na "+p.nDays+(p.nDays===1?" dzień":" dni")),
+      h("div",{class:"muted small"},p.people.map(x=>x.name+" "+x.kcal+" kcal").join(" · "))),
+    w&&h("button",{class:"btn small",onclick:()=>{const r=buildPlan(planSettings(p),p,true);if(r.error)return toast(r.error);store.setPlan(r.plan);store.resetChecks();toast("Ułożono nowy jadłospis")}},"Ułóż od nowa"));
+  const days=h("div",{class:"days"},p.days.map((day,i)=>h("section",{class:"day"},
+    h("header",null,h("b",null,dayLabel(p,i))),
+    SLOTS.map(([s,label])=>{const r=R[day[s]];if(!r)return null;const key=i+s;
+      return h("details",{class:"meal",open:openMeals.has(key),ontoggle:e=>{e.target.open?openMeals.add(key):openMeals.delete(key)}},
+        h("summary",null,h("span",{class:"slot"},label),h("span",{class:"name"},r.name),h("span",{class:"chev","aria-hidden":"true"},"▾")),
+        h("div",{class:"body"},
+          h("div",{class:"scroll"},h("table",null,
+            h("thead",null,h("tr",null,h("th",null,"Składnik"),p.people.map(x=>h("th",null,x.name)))),
+            h("tbody",null,Object.keys(r.ing).map(k=>h("tr",null,h("td",null,ING[k][0]),p.people.map(x=>h("td",null,fmtPortion(k,r.ing[k]*factor(x,s,r))))))),
+            h("tfoot",null,h("tr",null,h("td",{class:"muted"},"Energia"),p.people.map(x=>h("td",{class:"muted"},Math.round(x.kcal*SLOTS.find(z=>z[0]===s)[2])+" kcal")))))),
+          h("p",{class:"small",style:"margin:0"},r.how),
+          w&&h("div",null,h("button",{class:"btn small",onclick:()=>swapMeal(i,s)},"Wymień to danie"))));
+    }),
+    h("footer",null,p.people.map(x=>{const m=dayMacros(p,day,x);return h("span",null,h("b",null,x.name+": "),Math.round(m.kcal)+" kcal · B "+Math.round(m.b)+" g · T "+Math.round(m.t)+" g · W "+Math.round(m.w)+" g")}))
+  )));
+  return[head,days,h("p",{class:"muted small",style:"margin:0"},"B – białko, T – tłuszcze, W – węglowodany. Wartości są szacunkowe. Jadłospis nie zastępuje porady dietetyka ani lekarza.")];
+}
+function planSettings(p){return{people:p.people.map(x=>({...x})),diet:{...p.diet},exclude:[...p.exclude],nDays:p.nDays,start:p.start}}
+function swapMeal(i,s){
+  const p=state.plan,n={...planSettings(p),days:p.days.map(d=>({...d}))};
+  const id=pick(s,n,i,n.days[i][s]);
+  if(!id||id===n.days[i][s])return toast("Nie ma innego dania, które pasuje do tej diety.");
+  n.days[i][s]=id;store.setPlan(n);
+}
+function viewShop(){
+  const p=state.plan;if(!p||!p.days.length)return[emptyState()];
+  const w=state.canWrite,t=shopping(p),keys=Object.keys(t);
+  const done=keys.filter(k=>state.checks[k]).length+state.extras.filter(e=>e.done).length,all=keys.length+state.extras.length;
+  const item=(checked,name,qty,onch,del)=>h("li",{class:checked?"done":""},
+    h("label",null,h("input",{type:"checkbox",checked,disabled:!w,onchange:e=>onch(e.target.checked)}),h("span",{class:"n"},name),qty&&h("span",{class:"q"},qty)),
+    del&&w&&h("button",{class:"x","aria-label":"Usuń "+name,onclick:del},"×"));
+  const top=h("div",{class:"panel"},
+    h("div",{class:"row spread"},h("h2",null,"Lista zakupów"),h("span",{class:"muted small"},"Kupione "+done+" z "+all)),
+    h("div",{class:"bar"},h("i",{style:"width:"+(all?done/all*100:0)+"%"})),
+    h("div",{class:"muted small"},"Na "+p.nDays+(p.nDays===1?" dzień":" dni")+" dla "+p.people.length+(p.people.length===1?" osoby":" osób")+". Początek: "+dayLabel(p,0)+"."),
+    w&&h("form",{class:"row",onsubmit:e=>{e.preventDefault();const i=$("extra-name"),v=i.value.trim().slice(0,80);if(!v)return;store.addExtra(v);i.value=""}},
+      h("input",{type:"text",id:"extra-name",class:"grow",placeholder:"Dopisz coś, np. kawa, papier",maxLength:80,"aria-label":"Nowa pozycja"}),
+      h("button",{class:"btn",type:"submit"},"Dodaj")),
+    h("div",{class:"row"},
+      h("button",{class:"btn small",onclick:copyList},"Kopiuj listę"),
+      w&&done>0&&h("button",{class:"btn small",onclick:()=>{if(!armed){armed=true;render();setTimeout(()=>{armed=false;render()},4000);return}armed=false;store.resetChecks()}},armed?"Na pewno odznaczyć?":"Odznacz wszystko")));
+  const cats=h("div",{class:"cats"},
+    state.extras.length?h("section",{class:"panel"},h("h3",null,"Dopisane ręcznie"),h("ul",{class:"items"},state.extras.map(e=>item(e.done,e.name,"",v=>store.toggleExtra(e.id,v),()=>store.delExtra(e.id))))):null,
+    CATS.map(([c,label])=>{const ks=keys.filter(k=>ING[k][1]===c).sort((a,b)=>ING[a][0].localeCompare(ING[b][0],"pl"));
+      return ks.length?h("section",{class:"panel"},h("h3",null,label),h("ul",{class:"items"},ks.map(k=>item(!!state.checks[k],ING[k][0],fmtShop(k,t[k]),v=>store.setCheck(k,v))))):null}));
+  return[top,cats,h("p",{class:"muted small",style:"margin:0"},"Ilości są zaokrąglone w górę. Sól, przyprawy, czosnek, cytrynę i zioła weź z domowych zapasów.")];
+}
+function copyList(){
+  const p=state.plan,t=shopping(p),lines=["Lista zakupów ("+p.nDays+" dni, "+p.people.length+" os.)"];
+  for(const [c,label] of CATS){const ks=Object.keys(t).filter(k=>ING[k][1]===c&&!state.checks[k]);if(!ks.length)continue;lines.push("",label+":");for(const k of ks)lines.push("- "+ING[k][0]+": "+fmtShop(k,t[k]))}
+  const ex=state.extras.filter(e=>!e.done);if(ex.length){lines.push("","Inne:");for(const e of ex)lines.push("- "+e.name)}
+  const text=lines.join("\n");
+  const ok=()=>toast("Skopiowano listę. Wklej ją w wiadomości.");
+  try{navigator.clipboard.writeText(text).then(ok,()=>toast("Kopiowanie jest zablokowane w tej przeglądarce."))}catch(e){toast("Kopiowanie jest zablokowane w tej przeglądarce.")}
+}
+function viewDiet(){
+  if(!draft)draft=state.plan?planSettings(state.plan):defaults();
+  const d=draft,w=state.canWrite,touch=()=>{dirty=true;formError=""};
+  const save=fresh=>{
+    d.people.forEach((x,i)=>{x.name=x.name.trim().slice(0,30)||"Osoba "+(i+1);x.kcal=clamp(Math.round(+x.kcal)||2000,1000,5000)});
+    d.nDays=clamp(Math.round(+d.nDays)||7,1,14);
+    const r=buildPlan(d,state.plan,fresh);
+    if(r.error){formError=r.error;return render()}
+    dirty=false;draft=null;formError="";store.setPlan(r.plan);if(fresh)store.resetChecks();
+    toast(fresh?"Ułożono nowy jadłospis":"Zapisano zmiany");setTab("plan");
+  };
+  const dietChip=(key,label)=>h("label",{class:"chip"+(d.diet[key]?" on":"")},h("input",{type:"checkbox",id:"diet-"+key,checked:d.diet[key],disabled:!w,onchange:e=>{d.diet[key]=e.target.checked;touch();render()}}),label);
+  const free=Object.keys(ING).filter(k=>!d.exclude.includes(k)).sort((a,b)=>ING[a][0].localeCompare(ING[b][0],"pl"));
+  return[h("div",{class:"form"},
+    h("div",null,h("h2",null,"Dieta i osoby"),h("p",{class:"muted small",style:"margin:4px 0 0"},"Każda osoba dostaje te same dania w porcji przeliczonej na swoje kalorie. Lista zakupów sumuje wszystkich.")),
+    h("div",{class:"field"},h("span",null,"Kto je i ile kalorii dziennie"),
+      d.people.map((x,i)=>h("div",{class:"person"},
+        h("input",{type:"text",id:"p-name-"+i,class:"grow",value:x.name,maxLength:30,disabled:!w,"aria-label":"Imię",oninput:e=>{x.name=e.target.value;touch()}}),
+        h("input",{type:"number",id:"p-kcal-"+i,value:x.kcal,min:1000,max:5000,step:50,disabled:!w,"aria-label":"Kalorie dziennie",oninput:e=>{x.kcal=e.target.value;touch()}}),
+        h("span",{class:"muted small"},"kcal"),
+        w&&d.people.length>1&&h("button",{class:"x",type:"button","aria-label":"Usuń osobę",onclick:()=>{d.people.splice(i,1);touch();render()}},"×"))),
+      w&&d.people.length<8&&h("div",null,h("button",{class:"btn small",type:"button",onclick:()=>{d.people.push({name:"Osoba "+(d.people.length+1),kcal:2000});touch();render()}},"Dodaj osobę")),
+      h("span",{class:"muted small"},"Orientacyjnie: 1800–2200 kcal dla kobiety, 2200–2800 kcal dla mężczyzny. Przy odchudzaniu odejmij 300–500 kcal.")),
+    h("div",{class:"field"},h("span",null,"Rodzaj diety"),h("div",{class:"checks"},dietChip("noMeat","Bez mięsa i ryb"),dietChip("noGluten","Bez glutenu"),dietChip("noLactose","Bez laktozy"))),
+    h("div",{class:"field"},h("span",null,"Wykluczone produkty"),
+      d.exclude.length?h("div",{class:"checks"},d.exclude.map(k=>h("span",{class:"chip on"},ING[k][0],w&&h("button",{type:"button","aria-label":"Przywróć "+ING[k][0],onclick:()=>{d.exclude=d.exclude.filter(z=>z!==k);touch();render()}},"×")))):null,
+      h("select",{id:"exclude-add",disabled:!w,"aria-label":"Wyklucz produkt",onchange:e=>{if(e.target.value){d.exclude.push(e.target.value);touch();render()}}},
+        h("option",{value:""},"Wybierz produkt, którego nie jecie…"),free.map(k=>h("option",{value:k},ING[k][0])))),
+    h("div",{class:"row"},
+      h("label",{class:"field"},h("span",null,"Liczba dni"),h("input",{type:"number",id:"n-days",value:d.nDays,min:1,max:14,disabled:!w,oninput:e=>{d.nDays=e.target.value;touch()}})),
+      h("label",{class:"field"},h("span",null,"Pierwszy dzień"),h("input",{type:"date",id:"start",value:d.start,disabled:!w,oninput:e=>{if(e.target.value){d.start=e.target.value;touch()}}}))),
+    formError&&h("div",{class:"note"},formError),
+    w&&h("div",{class:"row"},
+      h("button",{class:"btn primary",type:"button",onclick:()=>save(true)},"Ułóż nowy jadłospis"),
+      state.plan&&h("button",{class:"btn",type:"button",onclick:()=>save(false)},"Zapisz, zostaw pasujące dania")))];
+}
+for(const b of document.querySelectorAll("nav button"))b.addEventListener("click",()=>setTab(b.dataset.tab));
+window.addEventListener("hashchange",()=>{const t=location.hash.slice(1);if(t&&t!==tab)setTab(t)});
+if(["zakupy","dieta"].includes(location.hash.slice(1)))tab=location.hash.slice(1);
+render();connect();
+</script>
