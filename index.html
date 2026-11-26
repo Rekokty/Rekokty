@@ -461,11 +461,15 @@ function fbStore(fs,hid){
   };
   /* Zapisy nie czekają na siebie: bez internetu Firestore trzyma je w kolejce i wysyła później. */
   const run=fn=>{try{Promise.resolve(fn()).catch(fail)}catch(e){fail(e)}};
-  const timer=setTimeout(()=>{state.stale=true;state.ready=true;render()},10000);
-  const fresh=snap=>{const was=state.stale;state.stale=snap.metadata.fromCache&&state.stale;if(!snap.metadata.fromCache)clearTimeout(timer);return was!==state.stale};
+  /* Bez includeMetadataChanges Firestore nie zgłasza przejścia z pamięci podręcznej na serwer, gdy dane się nie zmieniły,
+     więc aplikacja uznawałaby, że nie ma połączenia. */
+  let waited=false;
+  const timer=setTimeout(()=>{waited=true;state.stale=!live;state.ready=true;render()},10000);
+  let live=false;
+  const fresh=snap=>{live=!snap.metadata.fromCache;if(live){clearTimeout(timer);waited=true;state.stale=false}else if(waited)state.stale=true};
   const dead=()=>{clearTimeout(timer);state.stale=true;state.ready=true;render()};
   base.onSnapshot(s=>{const k=s.exists&&typeof s.data().aiKey==="string"?s.data().aiKey:"";if(k!==state.aiKey){useAiKey(k);onData()}},dead);
-  planRef.onSnapshot(s=>{fresh(s);state.rawPlan=s.exists?s.data():null;gotPlan=true;state.ready=gotRecipes||state.ready;onData()},dead);
+  planRef.onSnapshot({includeMetadataChanges:true},s=>{fresh(s);state.rawPlan=s.exists?s.data():null;gotPlan=true;state.ready=gotRecipes||state.ready;onData()},dead);
   checksRef.onSnapshot(s=>{const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};state.shopDays=cleanDays(s.exists&&s.data().days);onData()},dead);
   extras.onSnapshot(s=>{state.extras=s.docs.map(x=>{const d=x.data()||{};return{id:x.id,name:String(d.name||"").slice(0,80),done:!!d.done,at:+d.at||0}}).sort((a,b)=>a.at-b.at);onData()},dead);
   base.collection("log").onSnapshot(s=>{const m={};for(const x of s.docs)m[x.id]=x.data()||{};state.log=m;onData()},dead);
