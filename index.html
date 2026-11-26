@@ -64,6 +64,8 @@ h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--mu
 .meal summary::-webkit-details-marker{display:none}
 .meal .slot{grid-column:1/-1;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--beet);font-weight:700}
 .meal .name{font-weight:600;min-width:0}
+.meal .who{grid-column:1/-1;font-size:.82rem;color:var(--muted)}
+.chip.sm{padding:4px 10px;font-size:.84rem}
 .meal .chev{color:var(--muted);font-size:.8rem;transition:transform .15s}
 .meal[open] .chev{transform:rotate(180deg)}
 .meal .body{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}
@@ -100,7 +102,7 @@ input[type=text],input[type=password],input[type=number],input[type=date],select
 .person{display:flex;gap:8px;align-items:center}
 .person input[type=number]{width:88px}
 .checks{display:flex;flex-wrap:wrap;gap:8px}
-.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 13px;font-size:.92rem;cursor:pointer}
+.chip{color:var(--ink);display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:7px 13px;font-size:.92rem;cursor:pointer}
 .chip input{accent-color:var(--beet)}
 .chip.on{background:var(--beet-soft);border-color:var(--beet);color:var(--beet)}
 .chip button{border:0;background:none;color:inherit;font-size:1rem;cursor:pointer;padding:0 0 0 2px}
@@ -286,12 +288,16 @@ function applyCustom(list){
 /* ---------- Logika diety ---------- */
 const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
 const todayISO=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
-function defaults(){return{people:[{name:"Osoba 1",kcal:2000},{name:"Osoba 2",kcal:2500}],diet:{noMeat:false,noGluten:false,noLactose:false},exclude:[],nDays:7,start:todayISO()}}
+const newId=()=>Math.random().toString(36).slice(2,8)||"p";
+const mkPerson=(name,kcal)=>({id:newId(),name,kcal,eats:{S:true,O:true,P:true,K:true},wd:false});
+function defaults(){return{people:[mkPerson("Osoba 1",2000),mkPerson("Osoba 2",2500)],diet:{noMeat:false,noGluten:false,noLactose:false},exclude:[],nDays:7,start:todayISO()}}
 /* Dane z bazy są współdzielone, więc każdy odczyt przechodzi przez normalizację. */
 function norm(p){
   if(!p||typeof p!=="object")return null;
   const d=defaults();
-  const people=(Array.isArray(p.people)?p.people:[]).slice(0,8).map((x,i)=>({name:String(x&&x.name||"Osoba "+(i+1)).slice(0,30),kcal:clamp(Math.round(+(x&&x.kcal))||2000,1000,5000)}));
+  const people=(Array.isArray(p.people)?p.people:[]).slice(0,8).map((x,i)=>{x=x||{};const e=x.eats&&typeof x.eats==="object"?x.eats:{};
+    return{id:/^[A-Za-z0-9]{1,12}$/.test(x.id)?x.id:"p"+i,name:String(x.name||"Osoba "+(i+1)).slice(0,30),kcal:clamp(Math.round(+x.kcal)||2000,1000,5000),
+      eats:{S:e.S!==false,O:e.O!==false,P:e.P!==false,K:e.K!==false},wd:!!x.wd}});
   const out={
     people:people.length?people:d.people,
     diet:{noMeat:!!(p.diet&&p.diet.noMeat),noGluten:!!(p.diet&&p.diet.noGluten),noLactose:!!(p.diet&&p.diet.noLactose)},
@@ -301,7 +307,9 @@ function norm(p){
     days:[]
   };
   for(const day of Array.isArray(p.days)?p.days.slice(0,14):[]){
-    const o={};for(const [s] of SLOTS){const r=R[day&&day[s]];if(r&&r.slot===s)o[s]=r.id}
+    const o={},ov={};for(const [s] of SLOTS){const r=R[day&&day[s]];if(r&&r.slot===s)o[s]=r.id;
+      const m=day&&day.ov&&day.ov[s];if(m&&typeof m==="object"){const c={};for(const k in m)if(/^[A-Za-z0-9]{1,12}$/.test(k)&&typeof m[k]==="boolean")c[k]=m[k];if(Object.keys(c).length)ov[s]=c}}
+    if(Object.keys(ov).length)o.ov=ov;
     out.days.push(o);
   }
   return out;
@@ -330,6 +338,7 @@ function buildPlan(settings,old,fresh){
   for(const [s,label] of SLOTS)if(!RECIPES.some(r=>r.slot===s&&allowed(r,p)))return{error:"Przy tych ograniczeniach nie ma żadnego dania na: "+label.toLowerCase()+". Usuń któreś wykluczenie."};
   for(let i=0;i<p.nDays;i++){
     const day={};p.days.push(day);
+    if(!fresh&&old&&old.days[i]&&old.days[i].ov)day.ov=JSON.parse(JSON.stringify(old.days[i].ov));
     for(const [s] of SLOTS){
       const prev=!fresh&&old&&old.days[i]&&R[old.days[i][s]];
       if(prev&&allowed(prev,p))day[s]=prev.id;
@@ -351,33 +360,48 @@ function fmtShop(k,g){
   const r=Math.ceil(g/10)*10,ml=i[7]==="ml";
   return r>=1000?num(r/1000,2)+(ml?" l":" kg"):r+(ml?" ml":" g");
 }
-function shopping(p){
+const dateOf=(p,i)=>{const d=new Date(p.start+"T12:00:00");d.setDate(d.getDate()+i);return d};
+/* Kto je dany posiłek: zmiana z jadłospisu na ten dzień wygrywa, potem ustawienia osoby (wyłączenia mogą dotyczyć tylko pon–pt). */
+function eats(p,i,s,x){
+  const day=p.days[i],o=day&&day.ov&&day.ov[s]&&day.ov[s][x.id];
+  if(typeof o==="boolean")return o;
+  if(x.eats[s])return true;
+  if(x.wd){const wd=dateOf(p,i).getDay();return wd===0||wd===6}
+  return false;
+}
+/* days: lista numerów dni albo null dla całego jadłospisu. */
+function shopping(p,days){
   const t={};
-  for(const day of p.days)for(const [s] of SLOTS){const r=R[day[s]];if(!r)continue;
-    for(const person of p.people){const f=factor(person,s,r);for(const k in r.ing)t[k]=(t[k]||0)+r.ing[k]*f}}
+  p.days.forEach((day,i)=>{if(days&&!days.includes(i))return;
+    for(const [s] of SLOTS){const r=R[day[s]];if(!r)continue;
+      for(const person of p.people){if(!eats(p,i,s,person))continue;const f=factor(person,s,r);for(const k in r.ing)t[k]=(t[k]||0)+r.ing[k]*f}}});
   return t;
 }
-function dayLabel(p,i){const d=new Date(p.start+"T12:00:00");d.setDate(d.getDate()+i);return d.toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"numeric"})}
-function dayMacros(p,day,person){
-  let b=0,t=0,w=0,kcal=0;
-  for(const [s] of SLOTS){const r=R[day[s]];if(!r)continue;const f=factor(person,s,r);kcal+=r.kcal*f;
+const cleanDays=a=>Array.isArray(a)?[...new Set(a.filter(n=>Number.isInteger(n)&&n>=0&&n<14))].sort((x,y)=>x-y):[];
+function shopDays(p){const d=state.shopDays.filter(i=>i<p.days.length);return d.length&&d.length<p.days.length?d:null}
+function dayLabel(p,i){return dateOf(p,i).toLocaleDateString("pl-PL",{weekday:"long",day:"numeric",month:"numeric"})}
+function dayShort(p,i){return dateOf(p,i).toLocaleDateString("pl-PL",{weekday:"short",day:"numeric",month:"numeric"})}
+function dayMacros(p,i,person){
+  let b=0,t=0,w=0,kcal=0;const day=p.days[i];
+  for(const [s] of SLOTS){const r=R[day[s]];if(!r||!eats(p,i,s,person))continue;const f=factor(person,s,r);kcal+=r.kcal*f;
     for(const k in r.ing){const g=r.ing[k]*f/100;b+=ING[k][3]*g;t+=ING[k][4]*g;w+=ING[k][5]*g}}
   return{kcal,b,t,w};
 }
 
 /* ---------- Magazyn danych: baza współdzielona albo pamięć przeglądarki ---------- */
-const state={plan:null,rawPlan:null,custom:[],checks:{},extras:[],ready:false,shared:false,canWrite:true,stale:false,ai:null,aiImages:null,app:false,fb:false,hid:"",aiKey:""};
+const state={plan:null,rawPlan:null,custom:[],checks:{},shopDays:[],extras:[],ready:false,shared:false,canWrite:true,stale:false,ai:null,aiImages:null,app:false,fb:false,hid:"",aiKey:""};
 let store=null;
 function localStore(){
   const KEY="wspolny-jadlospis";
   let d={plan:null,checks:{},extras:[],recipes:[]};
   try{Object.assign(d,JSON.parse(localStorage.getItem(KEY)||"{}"))}catch(e){}
-  const push=()=>{try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}state.rawPlan=d.plan;state.custom=(d.recipes||[]).map(x=>{const c=cleanRecipe(x);if(c)c.id=x.id;return c}).filter(Boolean);state.checks=d.checks||{};state.extras=d.extras||[];state.ready=true;onData()};
+  const push=()=>{try{localStorage.setItem(KEY,JSON.stringify(d))}catch(e){}state.rawPlan=d.plan;state.custom=(d.recipes||[]).map(x=>{const c=cleanRecipe(x);if(c)c.id=x.id;return c}).filter(Boolean);state.checks=d.checks||{};state.shopDays=cleanDays(d.shopDays);state.extras=d.extras||[];state.ready=true;onData()};
   push();
   return{
     setPlan(p){d.plan=p;push()},
     setCheck(k,v){d.checks={...d.checks,[k]:v};push()},
-    resetChecks(){d.checks={};d.extras=d.extras.map(e=>({...e,done:false}));push()},
+    resetChecks(keepDays){d.checks={};if(!keepDays)d.shopDays=[];d.extras=d.extras.map(e=>({...e,done:false}));push()},
+    setShopDays(a){d.shopDays=a;push()},
     addExtra(name){d.extras=[...d.extras,{id:"e"+Date.now(),name,done:false,at:Date.now()}];push()},
     toggleExtra(id,v){d.extras=d.extras.map(e=>e.id===id?{...e,done:v}:e);push()},
     delExtra(id){d.extras=d.extras.filter(e=>e.id!==id);push()},
@@ -423,13 +447,14 @@ function fbStore(fs,hid){
   const dead=()=>{clearTimeout(timer);state.stale=true;state.ready=true;render()};
   base.onSnapshot(s=>{const k=s.exists&&typeof s.data().aiKey==="string"?s.data().aiKey:"";if(k!==state.aiKey){useAiKey(k);onData()}},dead);
   planRef.onSnapshot(s=>{fresh(s);state.rawPlan=s.exists?s.data():null;gotPlan=true;state.ready=gotRecipes||state.ready;onData()},dead);
-  checksRef.onSnapshot(s=>{const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};onData()},dead);
+  checksRef.onSnapshot(s=>{const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};state.shopDays=cleanDays(s.exists&&s.data().days);onData()},dead);
   extras.onSnapshot(s=>{state.extras=s.docs.map(x=>{const d=x.data()||{};return{id:x.id,name:String(d.name||"").slice(0,80),done:!!d.done,at:+d.at||0}}).sort((a,b)=>a.at-b.at);onData()},dead);
   recipes.onSnapshot(s=>{state.custom=s.docs.map(x=>{const c=cleanRecipe(x.data());if(c)c.id=x.id;return c}).filter(Boolean).sort((a,b)=>a.at-b.at);gotRecipes=true;state.ready=gotPlan||state.ready;onData()},dead);
   return{
     setPlan(p){run(()=>planRef.set({...p,stamp:Date.now()}))},
     setCheck(k,v){run(()=>checksRef.set({done:{[k]:v}},{merge:true}))},
-    resetChecks(){const ex=state.extras.filter(e=>e.done);run(()=>checksRef.set({done:{}}));for(const e of ex)run(()=>extras.doc(e.id).update({done:false}))},
+    setShopDays(a){run(()=>checksRef.set({days:a},{merge:true}))},
+    resetChecks(keepDays){const ex=state.extras.filter(e=>e.done),days=keepDays?state.shopDays:[];run(()=>checksRef.set({done:{},days}));for(const e of ex)run(()=>extras.doc(e.id).update({done:false}))},
     addExtra(name){run(()=>extras.add({name,done:false,at:Date.now()}))},
     toggleExtra(id,v){run(()=>extras.doc(id).update({done:v}))},
     delExtra(id){run(()=>extras.doc(id).delete())},
@@ -507,12 +532,13 @@ function dbStore(db){
   const dead=()=>{clearTimeout(timer);state.stale=true;state.ready=true;render()};
   planRef.onSnapshot(s=>{fresh(s);state.rawPlan=s.exists?s.data():null;gotPlan=true;state.ready=gotRecipes;onData()},dead);
   recipes.onSnapshot(s=>{state.custom=s.docs.map(x=>{const c=cleanRecipe(x.data());if(c)c.id=x.id;return c}).filter(Boolean).sort((a,b)=>a.at-b.at);gotRecipes=true;state.ready=gotPlan;onData()},dead);
-  checksRef.onSnapshot(s=>{checksExist=s.exists;const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};onData()},dead);
+  checksRef.onSnapshot(s=>{checksExist=s.exists;const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};state.shopDays=cleanDays(s.exists&&s.data().days);onData()},dead);
   extras.onSnapshot(s=>{state.extras=s.docs.map(x=>{const d=x.data()||{};return{id:x.id,name:String(d.name||"").slice(0,80),done:!!d.done,at:+d.at||0}}).sort((a,b)=>a.at-b.at);onData()},dead);
   return{
     setPlan(p){run(()=>planRef.set({...p,stamp:Date.now()}))},
     setCheck(k,v){run(()=>checksExist?checksRef.update({done:{[k]:v}}):checksRef.set({done:{[k]:v}}))},
-    resetChecks(){const ex=state.extras.filter(e=>e.done);run(()=>checksRef.set({done:{}}));for(const e of ex)run(()=>extras.doc(e.id).update({done:false}))},
+    setShopDays(a){run(()=>checksExist?checksRef.update({days:a}):checksRef.set({done:{},days:a}))},
+    resetChecks(keepDays){const ex=state.extras.filter(e=>e.done),days=keepDays?state.shopDays:[];run(()=>checksRef.set({done:{},days}));for(const e of ex)run(()=>extras.doc(e.id).update({done:false}))},
     addExtra(name){run(()=>extras.add({name,done:false,at:Date.now()}))},
     toggleExtra(id,v){run(()=>extras.doc(id).update({done:v}))},
     delExtra(id){run(()=>extras.doc(id).delete())},
@@ -591,25 +617,33 @@ function viewPlan(){
     w&&h("button",{class:"btn small",onclick:()=>{const r=buildPlan(planSettings(p),p,true);if(r.error)return toast(r.error);store.setPlan(r.plan);store.resetChecks();toast("Ułożono nowy jadłospis")}},"Ułóż od nowa"));
   const days=h("div",{class:"days"},p.days.map((day,i)=>h("section",{class:"day"},
     h("header",null,h("b",null,dayLabel(p,i))),
-    SLOTS.map(([s,label])=>{const r=R[day[s]];if(!r)return null;const key=i+s;
+    SLOTS.map(([s,label])=>{const r=R[day[s]];if(!r)return null;const key=i+s,who=p.people.filter(x=>eats(p,i,s,x));
       return h("details",{class:"meal",open:openMeals.has(key),ontoggle:e=>{e.target.open?openMeals.add(key):openMeals.delete(key)}},
-        h("summary",null,h("span",{class:"slot"},label),h("span",{class:"name"},r.name),h("span",{class:"chev","aria-hidden":"true"},"▾")),
+        h("summary",null,h("span",{class:"slot"},label),h("span",{class:"name"},r.name),h("span",{class:"chev","aria-hidden":"true"},"▾"),
+          who.length<p.people.length&&h("span",{class:"who"},who.length?"Je: "+who.map(x=>x.name).join(", "):"Nikt nie je tego posiłku")),
         h("div",{class:"body"},
-          h("div",{class:"scroll"},h("table",null,
-            h("thead",null,h("tr",null,h("th",null,"Składnik"),p.people.map(x=>h("th",null,x.name)))),
-            h("tbody",null,Object.keys(r.ing).map(k=>h("tr",null,h("td",null,ING[k][0]),p.people.map(x=>h("td",null,fmtPortion(k,r.ing[k]*factor(x,s,r))))))),
-            h("tfoot",null,h("tr",null,h("td",{class:"muted"},"Energia"),p.people.map(x=>h("td",{class:"muted"},Math.round(x.kcal*SLOTS.find(z=>z[0]===s)[2])+" kcal")))))),
+          h("div",{class:"checks"},h("span",{class:"muted small",style:"align-self:center"},"Kto je:"),
+            p.people.map(x=>{const on=who.includes(x);return h("label",{class:"chip sm"+(on?" on":"")},h("input",{type:"checkbox",checked:on,disabled:!w,onchange:()=>setEater(i,s,x,!on)}),x.name)})),
+          who.length?h("div",{class:"scroll"},h("table",null,
+            h("thead",null,h("tr",null,h("th",null,"Składnik"),who.map(x=>h("th",null,x.name)))),
+            h("tbody",null,Object.keys(r.ing).map(k=>h("tr",null,h("td",null,ING[k][0]),who.map(x=>h("td",null,fmtPortion(k,r.ing[k]*factor(x,s,r))))))),
+            h("tfoot",null,h("tr",null,h("td",{class:"muted"},"Energia"),who.map(x=>h("td",{class:"muted"},Math.round(x.kcal*SLOTS.find(z=>z[0]===s)[2])+" kcal")))))):null,
           h("p",{class:"small",style:"margin:0"},r.how),
           w&&h("div",{class:"row"},h("button",{class:"btn small",onclick:()=>swapMeal(i,s)},"Wylosuj inne"),
             h("select",{class:"grow","aria-label":"Wybierz danie",onchange:e=>{if(e.target.value)swapMeal(i,s,e.target.value)}},
               h("option",{value:""},"albo wybierz danie…"),
               RECIPES.filter(z=>z.slot===s&&z.id!==r.id&&allowed(z,p)).sort((a,b)=>(b.custom?1:0)-(a.custom?1:0)||a.name.localeCompare(b.name,"pl")).map(z=>h("option",{value:z.id},(z.custom?"★ ":"")+z.name))))));
     }),
-    h("footer",null,p.people.map(x=>{const m=dayMacros(p,day,x);return h("span",null,h("b",null,x.name+": "),Math.round(m.kcal)+" kcal · B "+Math.round(m.b)+" g · T "+Math.round(m.t)+" g · W "+Math.round(m.w)+" g")}))
+    h("footer",null,p.people.map(x=>{const m=dayMacros(p,i,x);return h("span",null,h("b",null,x.name+": "),Math.round(m.kcal)+" kcal · B "+Math.round(m.b)+" g · T "+Math.round(m.t)+" g · W "+Math.round(m.w)+" g")}))
   )));
   return[head,days,h("p",{class:"muted small",style:"margin:0"},"B – białko, T – tłuszcze, W – węglowodany. Wartości są szacunkowe. Jadłospis nie zastępuje porady dietetyka ani lekarza.")];
 }
-function planSettings(p){return{people:p.people.map(x=>({...x})),diet:{...p.diet},exclude:[...p.exclude],nDays:p.nDays,start:p.start}}
+function setEater(i,s,x,on){
+  const p=state.plan,n={...planSettings(p),days:p.days.map(d=>JSON.parse(JSON.stringify(d)))},day=n.days[i];
+  day.ov=day.ov||{};day.ov[s]={...(day.ov[s]||{}),[x.id]:on};
+  store.setPlan(n);
+}
+function planSettings(p){return{people:p.people.map(x=>({...x,eats:{...x.eats}})),diet:{...p.diet},exclude:[...p.exclude],nDays:p.nDays,start:p.start}}
 function swapMeal(i,s,chosen){
   const p=state.plan,n={...planSettings(p),days:p.days.map(d=>({...d}))};
   const id=chosen||pick(s,n,i,n.days[i][s]);
@@ -618,7 +652,8 @@ function swapMeal(i,s,chosen){
 }
 function viewShop(){
   const p=state.plan;if(!p||!p.days.length)return[emptyState()];
-  const w=state.canWrite,t=shopping(p),keys=Object.keys(t);
+  const w=state.canWrite,sel=shopDays(p),t=shopping(p,sel),keys=Object.keys(t);
+  const pickDay=i=>{let n=sel?(sel.includes(i)?sel.filter(z=>z!==i):[...sel,i]):[i];if(n.length>=p.days.length)n=[];store.setShopDays(cleanDays(n))};
   const done=keys.filter(k=>state.checks[k]).length+state.extras.filter(e=>e.done).length,all=keys.length+state.extras.length;
   const item=(checked,name,qty,onch,del)=>h("li",{class:checked?"done":""},
     h("label",null,h("input",{type:"checkbox",checked,disabled:!w,onchange:e=>onch(e.target.checked)}),h("span",{class:"n"},name),qty&&h("span",{class:"q"},qty)),
@@ -626,13 +661,15 @@ function viewShop(){
   const top=h("div",{class:"panel"},
     h("div",{class:"row spread"},h("h2",null,"Lista zakupów"),h("span",{class:"muted small"},"Kupione "+done+" z "+all)),
     h("div",{class:"bar"},h("i",{style:"width:"+(all?done/all*100:0)+"%"})),
-    h("div",{class:"muted small"},"Na "+p.nDays+(p.nDays===1?" dzień":" dni")+" dla "+p.people.length+(p.people.length===1?" osoby":" osób")+". Początek: "+dayLabel(p,0)+"."),
+    h("div",{class:"field"},h("span",{class:"muted small"},"Zakupy na które dni?"),h("div",{class:"checks"},
+      h("button",{class:"chip sm"+(sel?"":" on"),type:"button",disabled:!w,onclick:()=>store.setShopDays([])},"Cały jadłospis"),
+      p.days.map((_,i)=>h("button",{class:"chip sm"+(sel&&sel.includes(i)?" on":""),type:"button",disabled:!w,"aria-pressed":String(!!(sel&&sel.includes(i))),onclick:()=>pickDay(i)},dayShort(p,i))))),
     w&&h("form",{class:"row",onsubmit:e=>{e.preventDefault();const i=$("extra-name"),v=i.value.trim().slice(0,80);if(!v)return;store.addExtra(v);i.value=""}},
       h("input",{type:"text",id:"extra-name",class:"grow",placeholder:"Dopisz coś, np. kawa, papier",maxLength:80,"aria-label":"Nowa pozycja"}),
       h("button",{class:"btn",type:"submit"},"Dodaj")),
     h("div",{class:"row"},
       h("button",{class:"btn small",onclick:copyList},"Kopiuj listę"),
-      w&&done>0&&h("button",{class:"btn small",onclick:()=>{if(!armed){armed=true;render();setTimeout(()=>{armed=false;render()},4000);return}armed=false;store.resetChecks()}},armed?"Na pewno odznaczyć?":"Odznacz wszystko")));
+      w&&done>0&&h("button",{class:"btn small",onclick:()=>{if(!armed){armed=true;render();setTimeout(()=>{armed=false;render()},4000);return}armed=false;store.resetChecks(true)}},armed?"Na pewno odznaczyć?":"Odznacz wszystko")));
   const cats=h("div",{class:"cats"},
     state.extras.length?h("section",{class:"panel"},h("h3",null,"Dopisane ręcznie"),h("ul",{class:"items"},state.extras.map(e=>item(e.done,e.name,"",v=>store.toggleExtra(e.id,v),()=>store.delExtra(e.id))))):null,
     CATS.map(([c,label])=>{const ks=keys.filter(k=>ING[k][1]===c).sort((a,b)=>ING[a][0].localeCompare(ING[b][0],"pl"));
@@ -640,7 +677,7 @@ function viewShop(){
   return[top,cats,h("p",{class:"muted small",style:"margin:0"},"Ilości są zaokrąglone w górę. Sól, przyprawy, czosnek, cytrynę i zioła weź z domowych zapasów.")];
 }
 function copyList(){
-  const p=state.plan,t=shopping(p),lines=["Lista zakupów ("+p.nDays+" dni, "+p.people.length+" os.)"];
+  const p=state.plan,sel=shopDays(p),t=shopping(p,sel),lines=["Lista zakupów ("+(sel?sel.map(i=>dayShort(p,i)).join(", "):p.nDays+" dni")+")"];
   for(const [c,label] of CATS){const ks=Object.keys(t).filter(k=>ING[k][1]===c&&!state.checks[k]);if(!ks.length)continue;lines.push("",label+":");for(const k of ks)lines.push("- "+ING[k][0]+": "+fmtShop(k,t[k]))}
   const ex=state.extras.filter(e=>!e.done);if(ex.length){lines.push("","Inne:");for(const e of ex)lines.push("- "+e.name)}
   const text=lines.join("\n");
@@ -651,7 +688,7 @@ function viewDiet(){
   if(!draft)draft=state.plan?planSettings(state.plan):defaults();
   const d=draft,w=state.canWrite,touch=()=>{dirty=true;formError=""};
   const save=fresh=>{
-    d.people.forEach((x,i)=>{x.name=x.name.trim().slice(0,30)||"Osoba "+(i+1);x.kcal=clamp(Math.round(+x.kcal)||2000,1000,5000)});
+    d.people.forEach((x,i)=>{x.name=x.name.trim().slice(0,30)||"Osoba "+(i+1);x.kcal=clamp(Math.round(+x.kcal)||2000,1000,5000);if(SLOTS.every(([s])=>x.eats[s]))x.wd=false});
     d.nDays=clamp(Math.round(+d.nDays)||7,1,14);
     const r=buildPlan(d,state.plan,fresh);
     if(r.error){formError=r.error;return render()}
@@ -669,9 +706,12 @@ function viewDiet(){
         h("span",{class:"muted small"},"kcal"),
         w&&h("button",{class:"btn small",type:"button",onclick:()=>{calcIdx=calcIdx===i?-1:i;render()}},"Policz"),
         w&&d.people.length>1&&h("button",{class:"x",type:"button","aria-label":"Usuń osobę",onclick:()=>{d.people.splice(i,1);calcIdx=-1;touch();render()}},"×")),
-        calcIdx===i&&w?calcPanel(x,touch):null]),
-      w&&d.people.length<8&&h("div",null,h("button",{class:"btn small",type:"button",onclick:()=>{d.people.push({name:"Osoba "+(d.people.length+1),kcal:2000});touch();render()}},"Dodaj osobę")),
-      h("span",{class:"muted small"},"Nie znasz swojego zapotrzebowania? Kliknij „Policz” przy osobie.")),
+        calcIdx===i&&w?calcPanel(x,touch):null,
+        h("div",{class:"checks"},h("span",{class:"muted small",style:"align-self:center"},"Je w domu:"),
+          SLOTS.map(([s,l])=>h("label",{class:"chip sm"+(x.eats[s]?" on":"")},h("input",{type:"checkbox",id:"p-eat-"+i+s,checked:x.eats[s],disabled:!w,onchange:e=>{x.eats[s]=e.target.checked;touch();render()}}),l)),
+          SLOTS.some(([s])=>!x.eats[s])&&h("label",{class:"chip sm"+(x.wd?" on":"")},h("input",{type:"checkbox",id:"p-wd-"+i,checked:x.wd,disabled:!w,onchange:e=>{x.wd=e.target.checked;touch();render()}}),"Tylko pon–pt, w weekend je wszystko"))]),
+      w&&d.people.length<8&&h("div",null,h("button",{class:"btn small",type:"button",onclick:()=>{d.people.push(mkPerson("Osoba "+(d.people.length+1),2000));touch();render()}},"Dodaj osobę")),
+      h("span",{class:"muted small"},"Nie znasz swojego zapotrzebowania? Kliknij „Policz” przy osobie. Odznacz posiłek, którego ktoś zwykle nie je w domu (np. obiad w szkole). Na konkretny dzień zmienisz to w jadłospisie, w polu „Kto je”.")),
     h("div",{class:"field"},h("span",null,"Rodzaj diety"),h("div",{class:"checks"},dietChip("noMeat","Bez mięsa i ryb"),dietChip("noGluten","Bez glutenu"),dietChip("noLactose","Bez laktozy"))),
     h("div",{class:"field"},h("span",null,"Wykluczone produkty"),
       d.exclude.length?h("div",{class:"checks"},d.exclude.map(k=>h("span",{class:"chip on"},ING[k][0],w&&h("button",{type:"button","aria-label":"Przywróć "+ING[k][0],onclick:()=>{d.exclude=d.exclude.filter(z=>z!==k);touch();render()}},"×")))):null,
