@@ -5,7 +5,9 @@ service cloud.firestore {
     match /households/{code} {
       allow get, create, update: if request.auth != null;
       allow list, delete: if false;
-      match /{document=**} {
+      // Dokładnie dwa poziomy niżej (app, extras, recipes). Wzorzec {x=**} objąłby też sam dokument domu
+      // i pozwoliłby pobrać listę wszystkich kodów.
+      match /{collection}/{doc} {
         allow read, write: if request.auth != null;
       }
     }
