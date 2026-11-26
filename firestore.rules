@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Kod domu jest identyfikatorem dokumentu. Kto zna kod, ma dostęp; listy domów nie da się pobrać.
+    match /households/{code} {
+      allow get, create, update: if request.auth != null;
+      allow list, delete: if false;
+      match /{document=**} {
+        allow read, write: if request.auth != null;
+      }
+    }
+  }
+}

@@ -90,7 +90,7 @@ th{font-size:.74rem;color:var(--muted);font-weight:600}
 .items .q{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:.92rem}
 .items li.done .n{text-decoration:line-through;color:var(--muted)}
 .x{border:0;background:none;color:var(--muted);font-size:1.2rem;line-height:1;padding:8px;cursor:pointer;border-radius:8px}
-input[type=text],input[type=number],input[type=date],select{font-size:1rem;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-width:0}
+input[type=text],input[type=password],input[type=number],input[type=date],select{font-size:1rem;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-width:0}
 .grow{flex:1 1 160px}
 
 /* Ustawienia */
@@ -366,7 +366,7 @@ function dayMacros(p,day,person){
 }
 
 /* ---------- Magazyn danych: baza współdzielona albo pamięć przeglądarki ---------- */
-const state={plan:null,rawPlan:null,custom:[],checks:{},extras:[],ready:false,shared:false,canWrite:true,stale:false,ai:null,aiImages:null};
+const state={plan:null,rawPlan:null,custom:[],checks:{},extras:[],ready:false,shared:false,canWrite:true,stale:false,ai:null,aiImages:null,app:false,fb:false,hid:"",aiKey:""};
 let store=null;
 function localStore(){
   const KEY="wspolny-jadlospis";
@@ -382,8 +382,116 @@ function localStore(){
     toggleExtra(id,v){d.extras=d.extras.map(e=>e.id===id?{...e,done:v}:e);push()},
     delExtra(id){d.extras=d.extras.filter(e=>e.id!==id);push()},
     addRecipe(r){d.recipes=[...(d.recipes||[]),{...r,id:"r"+Date.now()}];push()},
-    delRecipe(id){d.recipes=(d.recipes||[]).filter(r=>r.id!==id);push()}
+    delRecipe(id){d.recipes=(d.recipes||[]).filter(r=>r.id!==id);push()},
+    setAiKey(k){lsSet(KEY_KEY,k);useAiKey(k);render()}
   };
+}
+/* ---------- Aplikacja na Androida: wspólny dom w Firebase i klucz API do skanowania ---------- */
+const HID_KEY="wj-household",KEY_KEY="wj-ai-key",LOCAL_KEY="wspolny-jadlospis";
+const lsGet=k=>{try{return localStorage.getItem(k)||""}catch(e){return ""}};
+const lsSet=(k,v)=>{try{v?localStorage.setItem(k,v):localStorage.removeItem(k)}catch(e){}};
+const within=(p,ms)=>Promise.race([p,new Promise((_,no)=>setTimeout(()=>no({code:"timeout"}),ms))]);
+const fmtCode=c=>c.slice(0,4)+"-"+c.slice(4);
+function useAiKey(k){
+  state.aiKey=k||"";
+  if(k&&window.RecipeAI){state.ai={json:(prompt,o)=>window.RecipeAI.json(k,prompt,{image:o.images&&o.images[0],signal:o.signal})};state.aiImages={mediaTypes:["image/jpeg","image/png","image/webp"],maxInputBytes:3e6}}
+  else{state.ai=null;state.aiImages=null}
+}
+let fbDb=null;
+async function fbInit(){
+  if(fbDb)return fbDb;
+  const fb=window.firebase;
+  if(!fb.apps.length)fb.initializeApp(window.FIREBASE_CONFIG);
+  const fs=fb.firestore();
+  try{await fs.enablePersistence({synchronizeTabs:true})}catch(e){}
+  const auth=fb.auth();
+  await new Promise(r=>{const un=auth.onAuthStateChanged(()=>{un();r()})});
+  if(!auth.currentUser)await within(auth.signInAnonymously(),15000);
+  return fbDb=fs;
+}
+function fbStore(fs,hid){
+  const base=fs.collection("households").doc(hid),planRef=base.collection("app").doc("plan"),checksRef=base.collection("app").doc("checks"),extras=base.collection("extras"),recipes=base.collection("recipes");
+  let gotPlan=false,gotRecipes=false;
+  const fail=e=>{
+    if(e&&e.code==="permission-denied")toast("Brak dostępu do wspólnego domu. Sprawdź reguły w Firebase.");
+    else toast("Nie udało się zapisać. Spróbuj ponownie za chwilę.");
+  };
+  /* Zapisy nie czekają na siebie: bez internetu Firestore trzyma je w kolejce i wysyła później. */
+  const run=fn=>{try{Promise.resolve(fn()).catch(fail)}catch(e){fail(e)}};
+  const timer=setTimeout(()=>{state.stale=true;state.ready=true;render()},10000);
+  const fresh=snap=>{const was=state.stale;state.stale=snap.metadata.fromCache&&state.stale;if(!snap.metadata.fromCache)clearTimeout(timer);return was!==state.stale};
+  const dead=()=>{clearTimeout(timer);state.stale=true;state.ready=true;render()};
+  base.onSnapshot(s=>{const k=s.exists&&typeof s.data().aiKey==="string"?s.data().aiKey:"";if(k!==state.aiKey){useAiKey(k);onData()}},dead);
+  planRef.onSnapshot(s=>{fresh(s);state.rawPlan=s.exists?s.data():null;gotPlan=true;state.ready=gotRecipes||state.ready;onData()},dead);
+  checksRef.onSnapshot(s=>{const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};onData()},dead);
+  extras.onSnapshot(s=>{state.extras=s.docs.map(x=>{const d=x.data()||{};return{id:x.id,name:String(d.name||"").slice(0,80),done:!!d.done,at:+d.at||0}}).sort((a,b)=>a.at-b.at);onData()},dead);
+  recipes.onSnapshot(s=>{state.custom=s.docs.map(x=>{const c=cleanRecipe(x.data());if(c)c.id=x.id;return c}).filter(Boolean).sort((a,b)=>a.at-b.at);gotRecipes=true;state.ready=gotPlan||state.ready;onData()},dead);
+  return{
+    setPlan(p){run(()=>planRef.set({...p,stamp:Date.now()}))},
+    setCheck(k,v){run(()=>checksRef.set({done:{[k]:v}},{merge:true}))},
+    resetChecks(){const ex=state.extras.filter(e=>e.done);run(()=>checksRef.set({done:{}}));for(const e of ex)run(()=>extras.doc(e.id).update({done:false}))},
+    addExtra(name){run(()=>extras.add({name,done:false,at:Date.now()}))},
+    toggleExtra(id,v){run(()=>extras.doc(id).update({done:v}))},
+    delExtra(id){run(()=>extras.doc(id).delete())},
+    addRecipe(r){run(()=>recipes.add(r))},
+    delRecipe(id){run(()=>recipes.doc(id).delete())},
+    setAiKey(k){run(()=>base.set({aiKey:k},{merge:true}))}
+  };
+}
+function genCode(){const A="ABCDEFGHJKLMNPQRSTUVWXYZ23456789",b=new Uint8Array(8);crypto.getRandomValues(b);return [...b].map(x=>A[x%32]).join("")}
+let shareBusy=false,shareError="",armedLeave=false;
+async function createHousehold(){
+  if(shareBusy)return;shareBusy=true;shareError="";render();
+  try{
+    const fs=await fbInit(),code=genCode(),base=fs.collection("households").doc(code);
+    let d={};try{d=JSON.parse(lsGet(LOCAL_KEY)||"{}")}catch(e){}
+    const batch=fs.batch();
+    batch.set(base,{created:Date.now(),aiKey:lsGet(KEY_KEY)});
+    if(d.plan)batch.set(base.collection("app").doc("plan"),d.plan);
+    batch.set(base.collection("app").doc("checks"),{done:d.checks||{}});
+    for(const e of (d.extras||[]).slice(0,150))batch.set(base.collection("extras").doc(String(e.id)),{name:String(e.name||""),done:!!e.done,at:+e.at||0});
+    for(const r of (d.recipes||[]).slice(0,150)){const c={...r};delete c.id;batch.set(base.collection("recipes").doc(String(r.id)),c)}
+    await within(batch.commit(),15000);
+    lsSet(HID_KEY,code);location.reload();
+  }catch(e){shareBusy=false;shareError=e&&e.code==="permission-denied"?"Firebase odrzucił zapis. Sprawdź, czy reguły bazy są wklejone.":"Nie udało się utworzyć wspólnego domu. Sprawdź internet i spróbuj ponownie.";render()}
+}
+async function joinHousehold(raw){
+  const code=String(raw).toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if(code.length!==8){shareError="Kod ma 8 znaków, np. ABCD-2345.";return render()}
+  if(shareBusy)return;shareBusy=true;shareError="";render();
+  try{
+    const fs=await fbInit(),snap=await within(fs.collection("households").doc(code).get(),15000);
+    if(!snap.exists){shareBusy=false;shareError="Nie ma wspólnego domu o takim kodzie. Sprawdź literówki.";return render()}
+    lsSet(HID_KEY,code);location.reload();
+  }catch(e){shareBusy=false;shareError="Nie udało się połączyć. Sprawdź internet i spróbuj ponownie.";render()}
+}
+function sharePanel(){
+  const kids=[h("h2",null,"Wspólna lista")];
+  if(!state.fb)kids.push(h("p",{class:"muted",style:"margin:0"},"Ta wersja aplikacji nie ma jeszcze włączonej wspólnej bazy, więc dane są tylko na tym telefonie."));
+  else if(state.hid){
+    kids.push(h("div",null,"Kod waszego domu: ",h("b",{style:"font-size:1.15rem;letter-spacing:.06em"},fmtCode(state.hid))),
+      h("p",{class:"muted small",style:"margin:0"},"Podaj ten kod drugiej osobie. Gdy wpisze go u siebie, zobaczy ten sam jadłospis i listę zakupów. Kto zna kod, ma dostęp, więc nie udostępniaj go publicznie."),
+      h("div",{class:"row"},
+        h("button",{class:"btn small",type:"button",onclick:()=>{try{navigator.clipboard.writeText(fmtCode(state.hid)).then(()=>toast("Skopiowano kod"),()=>{})}catch(e){}}},"Kopiuj kod"),
+        h("button",{class:"btn small",type:"button",onclick:()=>{if(!armedLeave){armedLeave=true;render();setTimeout(()=>{armedLeave=false;if(!typing())render()},4000);return}lsSet(HID_KEY,"");location.reload()}},armedLeave?"Na pewno odłączyć?":"Odłącz ten telefon")));
+  }else{
+    kids.push(h("p",{class:"muted",style:"margin:0"},"Teraz dane są tylko na tym telefonie. Utwórz wspólny dom albo dołącz do istniejącego, żeby dzielić jadłospis i zakupy z innymi."),
+      h("div",null,h("button",{class:"btn primary",type:"button",disabled:shareBusy,onclick:createHousehold},shareBusy?"Łączę…":"Utwórz wspólny dom")),
+      h("form",{class:"row",onsubmit:e=>{e.preventDefault();joinHousehold($("join-code").value)}},
+        h("input",{type:"text",id:"join-code",class:"grow",placeholder:"Kod od drugiej osoby",maxLength:12,autocapitalize:"characters","aria-label":"Kod wspólnego domu"}),
+        h("button",{class:"btn",type:"submit",disabled:shareBusy},"Dołącz")),
+      h("p",{class:"muted small",style:"margin:0"},"Przy tworzeniu domu obecny jadłospis i przepisy z tego telefonu zostaną do niego skopiowane."));
+  }
+  if(shareError)kids.push(h("div",{class:"note"},shareError));
+  return h("div",{class:"panel",id:"share-panel"},kids);
+}
+function aiKeyPanel(){
+  return h("div",{class:"panel"},h("h2",null,"Skanowanie przepisów"),
+    h("p",{class:"muted small",style:"margin:0"},state.aiKey?"Klucz API jest zapisany. Skanowanie działa w zakładce Przepisy.":"Żeby odczytywać przepisy ze zdjęć, wklej klucz API Claude (zaczyna się od sk-ant-). Utworzysz go na console.anthropic.com w sekcji API keys."),
+    h("form",{class:"row",onsubmit:e=>{e.preventDefault();const v=$("ai-key").value.trim();if(v&&!v.startsWith("sk-ant-"))return toast("To nie wygląda na klucz API Claude.");if(!v&&!state.aiKey)return;store.setAiKey(v);$("ai-key").value="";toast(v?"Zapisano klucz":"Usunięto klucz")}},
+      h("input",{type:"password",id:"ai-key",class:"grow",placeholder:state.aiKey?"Wklej nowy klucz albo zostaw puste, by usunąć":"sk-ant-…",autocomplete:"off","aria-label":"Klucz API"}),
+      h("button",{class:"btn",type:"submit"},state.aiKey?"Zmień":"Zapisz")),
+    h("p",{class:"muted small",style:"margin:0"},"Jedno zdjęcie kosztuje zwykle kilkanaście groszy z Twojego konta API. "+(state.hid?"Klucz jest wspólny dla wszystkich w waszym domu.":"Klucz jest zapisany tylko na tym telefonie.")));
 }
 function dbStore(db){
   const planRef=db.doc("app/plan"),checksRef=db.doc("app/checks"),extras=db.collection("extras"),recipes=db.collection("recipes");
@@ -416,7 +524,16 @@ async function connect(){
   let db=null,user=null,ai=null;
   try{if(window.claude&&window.claude.use)[db,user,ai]=await Promise.all([window.claude.use("db"),window.claude.use("user"),window.claude.use("sample")])}catch(e){}
   if(ai){state.ai=ai;try{state.aiImages=(await ai.limits()).images||null}catch(e){}}
-  if(!db){store=localStore();paintStatus();return}
+  if(!db){
+    state.app=!window.claude;
+    state.fb=state.app&&!!window.FIREBASE_CONFIG&&!!window.firebase;
+    const hid=state.fb?lsGet(HID_KEY):"";
+    if(hid){
+      try{const fs=await fbInit();state.hid=hid;state.shared=true;store=fbStore(fs,hid);paintStatus();return}
+      catch(e){toast("Nie udało się połączyć ze wspólnym domem. Pokazuję dane z tego telefonu.")}
+    }
+    store=localStore();if(state.app)useAiKey(lsGet(KEY_KEY));paintStatus();render();return;
+  }
   state.shared=true;
   try{if(user&&(await user.can("data.write"))===false)state.canWrite=false}catch(e){}
   store=dbStore(db);paintStatus();
@@ -440,7 +557,8 @@ function paintStatus(){
   const s=$("status");
   if(!store){s.textContent="Łączenie…";return}
   s.className="pill"+(state.shared&&state.canWrite?"":" local");
-  s.textContent=!state.shared?"Tylko na tym urządzeniu":state.canWrite?"Wspólne, na żywo":"Tylko podgląd";
+  s.textContent=!state.shared?(state.app?"Tylko na tym telefonie":"Tylko na tym urządzeniu"):state.canWrite?"Wspólne, na żywo":"Tylko podgląd";
+  s.style.cursor=state.app?"pointer":"";
 }
 let pending=false;
 const typing=()=>{const a=document.activeElement;return !!a&&$("view").contains(a)&&(a.tagName==="TEXTAREA"||a.tagName==="SELECT"||(a.tagName==="INPUT"&&a.type!=="checkbox"))};
@@ -453,11 +571,11 @@ function render(){
   const v=$("view"),kids=[];
   if(!state.ready)kids.push(h("p",{class:"muted"},"Wczytuję wspólne dane…"));
   else{
-    if(state.stale)kids.push(h("div",{class:"note"},"Nie mogę połączyć się ze wspólnymi danymi. To, co widzisz, może być nieaktualne."));
+    if(state.stale)kids.push(h("div",{class:"note"},state.app?"Brak połączenia. Widzisz ostatnio pobrane dane, a zmiany wyślą się, gdy wróci internet.":"Nie mogę połączyć się ze wspólnymi danymi. To, co widzisz, może być nieaktualne."));
     if(state.shared&&!state.canWrite)kids.push(h("div",{class:"note"},"Masz dostęp tylko do podglądu. Aby odhaczać zakupy i zmieniać dietę, poproś właściciela o dostęp do edycji."));
     kids.push(tab==="plan"?viewPlan():tab==="zakupy"?viewShop():tab==="przepisy"?viewRecipes():viewDiet());
   }
-  v.replaceChildren(...kids.flat());
+  v.replaceChildren(...kids.flat().filter(Boolean));
 }
 function emptyState(){
   return h("div",{class:"empty"},h("h2",null,"Nie ma jeszcze jadłospisu"),
@@ -542,7 +660,7 @@ function viewDiet(){
   };
   const dietChip=(key,label)=>h("label",{class:"chip"+(d.diet[key]?" on":"")},h("input",{type:"checkbox",id:"diet-"+key,checked:d.diet[key],disabled:!w,onchange:e=>{d.diet[key]=e.target.checked;touch();render()}}),label);
   const free=Object.keys(ING).filter(k=>!d.exclude.includes(k)).sort((a,b)=>ING[a][0].localeCompare(ING[b][0],"pl"));
-  return[h("div",{class:"form"},
+  return[state.app&&!state.hid&&state.fb?sharePanel():null,h("div",{class:"form"},
     h("div",null,h("h2",null,"Dieta i osoby"),h("p",{class:"muted small",style:"margin:4px 0 0"},"Każda osoba dostaje te same dania w porcji przeliczonej na swoje kalorie. Lista zakupów sumuje wszystkich.")),
     h("div",{class:"field"},h("span",null,"Kto je i ile kalorii dziennie"),
       d.people.map((x,i)=>[h("div",{class:"person"},
@@ -565,7 +683,8 @@ function viewDiet(){
     formError&&h("div",{class:"note"},formError),
     w&&h("div",{class:"row"},
       h("button",{class:"btn primary",type:"button",onclick:()=>save(true)},"Ułóż nowy jadłospis"),
-      state.plan&&h("button",{class:"btn",type:"button",onclick:()=>save(false)},"Zapisz, zostaw pasujące dania")))];
+      state.plan&&h("button",{class:"btn",type:"button",onclick:()=>save(false)},"Zapisz, zostaw pasujące dania"))),
+    state.app&&(state.hid||!state.fb)?sharePanel():null,state.app?aiKeyPanel():null];
 }
 /* Kalkulator zapotrzebowania: wzór Mifflina-St Jeora razy aktywność, plus albo minus cel. */
 let calcIdx=-1;
@@ -589,11 +708,11 @@ function calcPanel(person,touch){
 /* ---------- Przepisy ---------- */
 let rdraft=null,rError="",aiBusy=false,aiNote="",aiCtl=null,armedDel="";
 const blankItem=()=>({name:"",g:100,kcal:100,b:0,t:0,w:0,cat:"s",flags:""});
-const AI_ERR={not_granted:"Odczytywanie wymaga Twojej zgody na użycie Claude. Możesz wpisać przepis ręcznie.",rate_limited:"Za dużo prób naraz. Odczekaj chwilę i spróbuj ponownie.",image_rejected:"Nie udało się wczytać tego zdjęcia. Spróbuj z wyraźniejszym albo mniejszym.",images_unavailable:"W tym widoku nie można wysyłać zdjęć. Wklej tekst przepisu.",refused:"Claude nie odczytał tej treści. Wpisz przepis ręcznie."};
+const AI_ERR={bad_key:"Klucz API został odrzucony. Sprawdź go w zakładce Dieta.",no_credit:"Na koncie API brakuje środków albo limit został wyczerpany.",offline:"Brak połączenia z internetem.",not_granted:"Odczytywanie wymaga Twojej zgody na użycie Claude. Możesz wpisać przepis ręcznie.",rate_limited:"Za dużo prób naraz. Odczekaj chwilę i spróbuj ponownie.",image_rejected:"Nie udało się wczytać tego zdjęcia. Spróbuj z wyraźniejszym albo mniejszym.",images_unavailable:"W tym widoku nie można wysyłać zdjęć. Wklej tekst przepisu.",refused:"Claude nie odczytał tej treści. Wpisz przepis ręcznie."};
 async function shrink(f){
   try{
     const lim=(state.aiImages&&state.aiImages.maxInputBytes)||5e6;
-    if(f.size<Math.min(lim,1.5e6))return f;
+    if(f.size<Math.min(lim,1.5e6)&&(!state.app||state.aiImages.mediaTypes.includes(f.type)))return f;
     const bm=await createImageBitmap(f),sc=Math.min(1,1800/Math.max(bm.width,bm.height)),c=document.createElement("canvas");
     c.width=Math.round(bm.width*sc);c.height=Math.round(bm.height*sc);c.getContext("2d").drawImage(bm,0,0,c.width,c.height);
     return (await new Promise(r=>c.toBlob(r,"image/jpeg",.85)))||f;
@@ -615,7 +734,7 @@ async function scan(file,text){
     if(r){rdraft=r;aiNote="Sprawdź odczytane składniki i ilości, popraw, co trzeba, i zapisz."}
     else aiNote=out&&typeof out.error==="string"?"Nie udało się odczytać przepisu: "+out.error.slice(0,200):"Nie znalazłem składników w tej treści. Spróbuj z wyraźniejszym zdjęciem albo wpisz przepis ręcznie.";
   }catch(e){
-    if(e&&e.code==="not_granted")state.ai=null;
+    if(e&&e.code==="not_granted"&&!state.app)state.ai=null;
     aiNote=e&&e.code==="cancelled"?"":(e&&AI_ERR[e.code])||"Nie udało się odczytać przepisu. Spróbuj ponownie albo wpisz go ręcznie.";
   }
   aiBusy=false;render();
@@ -668,13 +787,15 @@ function viewRecipes(){
       aiBusy?h("div",{class:"row"},h("span",null,"Odczytuję przepis… To może potrwać do minuty."),h("button",{class:"btn small",onclick:()=>aiCtl&&aiCtl.abort()},"Przerwij")):[
         aiNote&&h("div",{class:"note"},aiNote),
         state.ai&&state.aiImages&&h("div",null,
-          h("label",{class:"btn primary",for:"r-photo",style:"display:inline-block"},"Zeskanuj zdjęcie przepisu"),
+          h("div",{class:"row"},h("label",{class:"btn primary",for:state.app?"r-camera":"r-photo"},state.app?"Zrób zdjęcie przepisu":"Zeskanuj zdjęcie przepisu"),
+            state.app&&h("label",{class:"btn",for:"r-photo"},"Wybierz z galerii")),
+          state.app&&h("input",{type:"file",id:"r-camera",class:"vh",accept:"image/*",capture:"environment",onchange:e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(f)scan(f,"")}}),
           h("input",{type:"file",id:"r-photo",class:"vh",accept:(state.aiImages.mediaTypes||["image/*"]).join(","),onchange:e=>{const f=e.target.files&&e.target.files[0];e.target.value="";if(f)scan(f,"")}}),
           h("div",{class:"muted small",style:"margin-top:6px"},"Zrób zdjęcie strony z książki, kartki albo zrzut ekranu. Claude odczyta tekst, wybierze składniki i policzy kalorie.")),
         state.ai&&h("div",{class:"field"},h("span",null,state.aiImages?"Albo wklej tekst przepisu":"Wklej tekst przepisu"),
           h("textarea",{id:"r-text",placeholder:"Np. skopiowany ze strony z przepisami",maxLength:6000}),
           h("div",null,h("button",{class:"btn",type:"button",onclick:()=>{const t=$("r-text").value.trim();if(t.length<15){aiNote="Wklej najpierw tekst przepisu.";return render()}scan(null,t)}},"Odczytaj składniki"))),
-        !state.ai&&h("div",{class:"muted small"},"Skanowanie zdjęć działa, gdy strona jest otwarta w aplikacji Claude i wyrazisz zgodę na użycie Claude. Tutaj możesz wpisać przepis ręcznie."),
+        !state.ai&&h("div",{class:"muted small"},state.app?"Żeby skanować zdjęcia przepisów, wpisz klucz API w zakładce Dieta. Bez niego możesz wpisać przepis ręcznie.":"Skanowanie zdjęć działa, gdy strona jest otwarta w aplikacji Claude i wyrazisz zgodę na użycie Claude. Tutaj możesz wpisać przepis ręcznie."),
         h("div",null,h("button",{class:"btn",type:"button",onclick:()=>{rdraft={name:"",slot:"O",how:"",items:[blankItem()]};aiNote="";render()}},"Wpisz ręcznie"))]));
   }
   out.push(h("div",{class:"panel"},h("h2",null,"Wasze przepisy"),
@@ -688,5 +809,6 @@ function viewRecipes(){
 for(const b of document.querySelectorAll("nav button"))b.addEventListener("click",()=>setTab(b.dataset.tab));
 window.addEventListener("hashchange",()=>{const t=location.hash.slice(1);if(t&&t!==tab)setTab(t)});
 if(["zakupy","przepisy","dieta"].includes(location.hash.slice(1)))tab=location.hash.slice(1);
+$("status").addEventListener("click",()=>{if(!state.app)return;setTab("dieta");const p=$("share-panel");if(p)p.scrollIntoView({block:"center"})});
 render();connect();
 </script>

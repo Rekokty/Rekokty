@@ -1,0 +1,6 @@
+{
+  "appId": "pl.rekokty.jadlospis",
+  "appName": "Wspólny Jadłospis",
+  "webDir": "www",
+  "android": { "adjustMarginsForEdgeToEdge": "force" }
+}
