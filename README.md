@@ -1,4 +1,4 @@
-# Wspólny Jadłospis
+# Amku Amku
 
 Aplikacja na Androida (i strona), która:
 
@@ -11,7 +11,7 @@ Aplikacja na Androida (i strona), która:
 ## Instalacja na telefonie
 
 Każda zmiana w repozytorium buduje nowy plik APK (zakładka **Actions**). Gotowy plik
-`wspolny-jadlospis.apk` jest w zakładce **Releases**. Pobierz go na telefon, otwórz
+`amku-amku.apk` jest w zakładce **Releases**. Pobierz go na telefon, otwórz
 i zezwól na instalację z tego źródła. Kolejne wersje instalują się jako aktualizacja.
 
 ## Wspólna lista (Firebase)

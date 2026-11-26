@@ -1,6 +1,6 @@
 {
   "appId": "pl.rekokty.jadlospis",
-  "appName": "Wspólny Jadłospis",
+  "appName": "Amku Amku",
   "webDir": "www",
   "android": { "adjustMarginsForEdgeToEdge": "force" }
 }
