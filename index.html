@@ -290,7 +290,7 @@ const clamp=(n,a,b)=>Math.min(b,Math.max(a,n));
 const todayISO=()=>{const d=new Date();return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
 const newId=()=>Math.random().toString(36).slice(2,8)||"p";
 const mkPerson=(name,kcal)=>({id:newId(),name,kcal,eats:{S:true,O:true,P:true,K:true},wd:false});
-function defaults(){return{people:[mkPerson("Osoba 1",2000),mkPerson("Osoba 2",2500)],diet:{noMeat:false,noGluten:false,noLactose:false},exclude:[],nDays:7,start:todayISO()}}
+function defaults(){return{people:[mkPerson("Osoba 1",2000),mkPerson("Osoba 2",2500)],diet:{noMeat:false,noGluten:false,noLactose:false},exclude:[],nDays:7,cook:1,start:todayISO()}}
 /* Dane z bazy są współdzielone, więc każdy odczyt przechodzi przez normalizację. */
 function norm(p){
   if(!p||typeof p!=="object")return null;
@@ -303,6 +303,7 @@ function norm(p){
     diet:{noMeat:!!(p.diet&&p.diet.noMeat),noGluten:!!(p.diet&&p.diet.noGluten),noLactose:!!(p.diet&&p.diet.noLactose)},
     exclude:(Array.isArray(p.exclude)?p.exclude:[]).filter(k=>ING[k]),
     nDays:clamp(Math.round(+p.nDays)||7,1,14),
+    cook:clamp(Math.round(+p.cook)||1,1,3),
     start:/^\d{4}-\d\d-\d\d$/.test(p.start)?p.start:d.start,
     days:[]
   };
@@ -344,7 +345,9 @@ function buildPlan(settings,old,fresh){
       if(prev&&allowed(prev,p))day[s]=prev.id;
     }
   }
-  for(let i=0;i<p.nDays;i++)for(const [s] of SLOTS)if(!p.days[i][s])p.days[i][s]=pick(s,p,i);
+  /* Obiad gotowany na kilka dni: kolejne dni bloku dostają to samo danie co dzień gotowania. */
+  if(p.cook>1)for(let i=0;i<p.nDays;i++)if(i%p.cook)delete p.days[i].O;
+  for(let i=0;i<p.nDays;i++)for(const [s] of SLOTS)if(!p.days[i][s])p.days[i][s]=s==="O"&&p.cook>1&&i%p.cook?p.days[cookDay(p,i)].O:pick(s,p,i);
   return{plan:p};
 }
 const factor=(person,slot,r)=>person.kcal*SLOTS.find(s=>s[0]===slot)[2]/r.kcal;
@@ -360,6 +363,9 @@ function fmtShop(k,g){
   const r=Math.ceil(g/10)*10,ml=i[7]==="ml";
   return r>=1000?num(r/1000,2)+(ml?" l":" kg"):r+(ml?" ml":" g");
 }
+const cookDay=(p,i)=>p.cook>1?i-i%p.cook:i;
+/* Czy obiad dnia i pochodzi z gotowania w pierwszym dniu bloku (to samo danie). */
+const leftover=(p,i)=>p.cook>1&&i%p.cook>0&&p.days[i].O===p.days[cookDay(p,i)].O;
 const dateOf=(p,i)=>{const d=new Date(p.start+"T12:00:00");d.setDate(d.getDate()+i);return d};
 /* Kto je dany posiłek: zmiana z jadłospisu na ten dzień wygrywa, potem ustawienia osoby (wyłączenia mogą dotyczyć tylko pon–pt). */
 function eats(p,i,s,x){
@@ -372,8 +378,10 @@ function eats(p,i,s,x){
 /* days: lista numerów dni albo null dla całego jadłospisu. */
 function shopping(p,days){
   const t={};
-  p.days.forEach((day,i)=>{if(days&&!days.includes(i))return;
+  p.days.forEach((day,i)=>{
     for(const [s] of SLOTS){const r=R[day[s]];if(!r)continue;
+      /* Składniki na obiad z kolejnych dni bloku kupuje się na dzień gotowania. */
+      if(days&&!days.includes(s==="O"&&leftover(p,i)?cookDay(p,i):i))continue;
       for(const person of p.people){if(!eats(p,i,s,person))continue;const f=factor(person,s,r);for(const k in r.ing)t[k]=(t[k]||0)+r.ing[k]*f}}});
   return t;
 }
@@ -619,7 +627,7 @@ function viewPlan(){
     h("header",null,h("b",null,dayLabel(p,i))),
     SLOTS.map(([s,label])=>{const r=R[day[s]];if(!r)return null;const key=i+s,who=p.people.filter(x=>eats(p,i,s,x));
       return h("details",{class:"meal",open:openMeals.has(key),ontoggle:e=>{e.target.open?openMeals.add(key):openMeals.delete(key)}},
-        h("summary",null,h("span",{class:"slot"},label),h("span",{class:"name"},r.name),h("span",{class:"chev","aria-hidden":"true"},"▾"),
+        h("summary",null,h("span",{class:"slot"},label+(s==="O"&&leftover(p,i)?" · z wcześniejszego gotowania":"")),h("span",{class:"name"},r.name),h("span",{class:"chev","aria-hidden":"true"},"▾"),
           who.length<p.people.length&&h("span",{class:"who"},who.length?"Je: "+who.map(x=>x.name).join(", "):"Nikt nie je tego posiłku")),
         h("div",{class:"body"},
           h("div",{class:"checks"},h("span",{class:"muted small",style:"align-self:center"},"Kto je:"),
@@ -628,6 +636,8 @@ function viewPlan(){
             h("thead",null,h("tr",null,h("th",null,"Składnik"),who.map(x=>h("th",null,x.name)))),
             h("tbody",null,Object.keys(r.ing).map(k=>h("tr",null,h("td",null,ING[k][0]),who.map(x=>h("td",null,fmtPortion(k,r.ing[k]*factor(x,s,r))))))),
             h("tfoot",null,h("tr",null,h("td",{class:"muted"},"Energia"),who.map(x=>h("td",{class:"muted"},Math.round(x.kcal*SLOTS.find(z=>z[0]===s)[2])+" kcal")))))):null,
+          s==="O"&&p.cook>1&&(leftover(p,i)?h("p",{class:"small muted",style:"margin:0"},"Ugotowane wcześniej ("+dayShort(p,cookDay(p,i))+"). Wystarczy odgrzać."):
+            i%p.cook===0&&p.days[i+1]&&leftover(p,i+1)&&h("p",{class:"small muted",style:"margin:0"},"Gotujesz na "+p.cook+" dni. Ilości w tabeli są na jeden dzień, lista zakupów liczy wszystkie.")),
           h("p",{class:"small",style:"margin:0"},r.how),
           w&&h("div",{class:"row"},h("button",{class:"btn small",onclick:()=>swapMeal(i,s)},"Wylosuj inne"),
             h("select",{class:"grow","aria-label":"Wybierz danie",onchange:e=>{if(e.target.value)swapMeal(i,s,e.target.value)}},
@@ -643,12 +653,14 @@ function setEater(i,s,x,on){
   day.ov=day.ov||{};day.ov[s]={...(day.ov[s]||{}),[x.id]:on};
   store.setPlan(n);
 }
-function planSettings(p){return{people:p.people.map(x=>({...x,eats:{...x.eats}})),diet:{...p.diet},exclude:[...p.exclude],nDays:p.nDays,start:p.start}}
+function planSettings(p){return{people:p.people.map(x=>({...x,eats:{...x.eats}})),diet:{...p.diet},exclude:[...p.exclude],nDays:p.nDays,cook:p.cook,start:p.start}}
 function swapMeal(i,s,chosen){
   const p=state.plan,n={...planSettings(p),days:p.days.map(d=>({...d}))};
   const id=chosen||pick(s,n,i,n.days[i][s]);
   if(!id||id===n.days[i][s])return toast("Nie ma innego dania, które pasuje do tej diety.");
-  n.days[i][s]=id;store.setPlan(n);
+  if(s==="O"&&n.cook>1){const a=cookDay(n,i);for(let j=a;j<Math.min(a+n.cook,n.days.length);j++)n.days[j].O=id}
+  else n.days[i][s]=id;
+  store.setPlan(n);
 }
 function viewShop(){
   const p=state.plan;if(!p||!p.days.length)return[emptyState()];
@@ -718,6 +730,8 @@ function viewDiet(){
       h("select",{id:"exclude-add",disabled:!w,"aria-label":"Wyklucz produkt",onchange:e=>{if(e.target.value){d.exclude.push(e.target.value);touch();render()}}},
         h("option",{value:""},"Wybierz produkt, którego nie jecie…"),free.map(k=>h("option",{value:k},ING[k][0])))),
     h("div",{class:"row"},
+      h("label",{class:"field"},h("span",null,"Obiad gotowany na"),h("select",{id:"cook",disabled:!w,onchange:e=>{d.cook=+e.target.value;touch()}},
+        [[1,"1 dzień (codziennie inny)"],[2,"2 dni"],[3,"3 dni"]].map(([v,l])=>h("option",{value:v,selected:d.cook===v},l)))),
       h("label",{class:"field"},h("span",null,"Liczba dni"),h("input",{type:"number",id:"n-days",value:d.nDays,min:1,max:14,disabled:!w,oninput:e=>{d.nDays=e.target.value;touch()}})),
       h("label",{class:"field"},h("span",null,"Pierwszy dzień"),h("input",{type:"date",id:"start",value:d.start,disabled:!w,oninput:e=>{if(e.target.value){d.start=e.target.value;touch()}}}))),
     formError&&h("div",{class:"note"},formError),
