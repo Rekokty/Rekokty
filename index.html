@@ -305,7 +305,7 @@ function norm(p){
   if(!p||typeof p!=="object")return null;
   const d=defaults();
   const people=(Array.isArray(p.people)?p.people:[]).slice(0,8).map((x,i)=>{x=x||{};const e=x.eats&&typeof x.eats==="object"?x.eats:{};
-    return{id:/^[A-Za-z0-9]{1,12}$/.test(x.id)?x.id:"p"+i,name:String(x.name||"Osoba "+(i+1)).slice(0,30),kcal:clamp(Math.round(+x.kcal)||2000,1000,5000),
+    return{id:typeof x.id==="string"&&/^[A-Za-z0-9]{1,12}$/.test(x.id)?x.id:"p"+i,name:String(x.name||"Osoba "+(i+1)).slice(0,30),kcal:clamp(Math.round(+x.kcal)||2000,1000,5000),
       eats:{S:e.S!==false,O:e.O!==false,P:e.P!==false,K:e.K!==false},wd:!!x.wd}});
   const out={
     people:people.length?people:d.people,
