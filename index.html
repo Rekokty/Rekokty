@@ -764,8 +764,8 @@ function viewShop(){
       h("button",{class:"btn small",onclick:copyList},"Kopiuj listę"),
       w&&done>0&&h("button",{class:"btn small",onclick:()=>{if(!armed){armed=true;render();setTimeout(()=>{armed=false;render()},4000);return}armed=false;store.resetChecks(true)}},armed?"Na pewno odznaczyć?":"Odznacz wszystko")));
   const cats=h("div",{class:"cats"},
-    state.extras.length?h("section",{class:"panel"},h("h3",null,"Dopisane ręcznie"),h("ul",{class:"items"},state.extras.map(e=>item(e.done,e.name,"",v=>store.toggleExtra(e.id,v),()=>store.delExtra(e.id))))):null,
-    CATS.map(([c,label])=>{const ks=keys.filter(k=>ING[k][1]===c).sort((a,b)=>ING[a][0].localeCompare(ING[b][0],"pl"));
+    state.extras.length?h("section",{class:"panel"},h("h3",null,"Dopisane ręcznie"),h("ul",{class:"items"},[...state.extras].sort((a,b)=>(a.done?1:0)-(b.done?1:0)).map(e=>item(e.done,e.name,"",v=>store.toggleExtra(e.id,v),()=>store.delExtra(e.id))))):null,
+    CATS.map(([c,label])=>{const ks=keys.filter(k=>ING[k][1]===c).sort((a,b)=>(state.checks[a]?1:0)-(state.checks[b]?1:0)||ING[a][0].localeCompare(ING[b][0],"pl"));
       return ks.length?h("section",{class:"panel"},h("h3",null,label),h("ul",{class:"items"},ks.map(k=>item(!!state.checks[k],ING[k][0],fmtShop(k,t[k]),v=>store.setCheck(k,v))))):null}));
   return[top,cats,h("p",{class:"muted small",style:"margin:0"},"Ilości są zaokrąglone w górę. Sól, przyprawy, czosnek, cytrynę i zioła weź z domowych zapasów.")];
 }
