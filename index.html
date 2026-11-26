@@ -452,12 +452,27 @@ async function fbInit(){
   if(!auth.currentUser)await within(auth.signInAnonymously(),15000);
   return fbDb=fs;
 }
+/* Gdy konto anonimowe telefonu przestanie działać (np. usunięte w konsoli Firebase), aplikacja loguje się od nowa.
+   Dostęp do domu daje kod, więc nowe konto niczego nie traci. Najwyżej raz na minutę, żeby nie zapętlić przeładowań. */
+function reauth(){
+  let last=0;try{last=+sessionStorage.getItem("wj-reauth")||0}catch(e){}
+  if(Date.now()-last<60000)return false;
+  try{sessionStorage.setItem("wj-reauth",String(Date.now()))}catch(e){return false}
+  toast("Odświeżam połączenie…");
+  const auth=window.firebase.auth();
+  auth.signOut().catch(()=>{}).then(()=>auth.signInAnonymously()).then(()=>location.reload(),()=>{});
+  return true;
+}
 function fbStore(fs,hid){
   const base=fs.collection("households").doc(hid),planRef=base.collection("app").doc("plan"),checksRef=base.collection("app").doc("checks"),extras=base.collection("extras"),recipes=base.collection("recipes");
   let gotPlan=false,gotRecipes=false;
+  const authCodes=["permission-denied","unauthenticated"];
   const fail=e=>{
-    if(e&&e.code==="permission-denied")toast("Brak dostępu do wspólnego domu. Sprawdź reguły w Firebase.");
-    else toast("Nie udało się zapisać. Spróbuj ponownie za chwilę.");
+    const code=(e&&e.code)||"";
+    console.warn("Zapis nieudany:",code,e&&e.message);
+    if(code==="not-found")return; /* pozycję usunęła w międzyczasie druga osoba */
+    if(authCodes.includes(code)){if(!reauth())toast("Brak dostępu do wspólnego domu. Sprawdź reguły w Firebase.");return}
+    toast("Nie udało się zapisać (błąd: "+(code||"nieznany")+"). Spróbuj ponownie za chwilę.");
   };
   /* Zapisy nie czekają na siebie: bez internetu Firestore trzyma je w kolejce i wysyła później. */
   const run=fn=>{try{Promise.resolve(fn()).catch(fail)}catch(e){fail(e)}};
@@ -467,7 +482,8 @@ function fbStore(fs,hid){
   const timer=setTimeout(()=>{waited=true;state.stale=!live;state.ready=true;render()},10000);
   let live=false;
   const fresh=snap=>{live=!snap.metadata.fromCache;if(live){clearTimeout(timer);waited=true;state.stale=false}else if(waited)state.stale=true};
-  const dead=()=>{clearTimeout(timer);state.stale=true;state.ready=true;render()};
+  const dead=e=>{console.warn("Odczyt przerwany:",e&&e.code,e&&e.message);if(e&&authCodes.includes(e.code)&&reauth())return;clearTimeout(timer);state.stale=true;state.ready=true;render()};
+  window.firebase.auth().onAuthStateChanged(u=>{if(!u)reauth()});
   base.onSnapshot(s=>{const k=s.exists&&typeof s.data().aiKey==="string"?s.data().aiKey:"";if(k!==state.aiKey){useAiKey(k);onData()}},dead);
   planRef.onSnapshot({includeMetadataChanges:true},s=>{fresh(s);state.rawPlan=s.exists?s.data():null;gotPlan=true;state.ready=gotRecipes||state.ready;onData()},dead);
   checksRef.onSnapshot(s=>{const d=s.exists&&s.data().done;state.checks=d&&typeof d==="object"?d:{};state.shopDays=cleanDays(s.exists&&s.data().days);onData()},dead);
