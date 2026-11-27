@@ -122,6 +122,7 @@ textarea{font:inherit;font-size:1rem;padding:10px 12px;border-radius:10px;border
 .daynav b{font-family:var(--display);font-size:1.15rem;text-transform:capitalize;text-align:center;flex:1}
 .sum{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-variant-numeric:tabular-nums}
 .sum b{font-family:var(--display);font-size:1.3rem}
+.items li.off .n,.items li.off .q{color:var(--muted)}
 .bar.over i{background:var(--beet)}
 .items .n small{display:block;font-size:.7rem;text-transform:uppercase;letter-spacing:.07em;color:var(--beet);font-weight:700}
 tr.cur td{font-weight:700}
@@ -634,8 +635,15 @@ function paintStatus(){
 let pending=false;
 const typing=()=>{const a=document.activeElement;return !!a&&$("view").contains(a)&&(a.tagName==="TEXTAREA"||a.tagName==="SELECT"||(a.tagName==="INPUT"&&a.type!=="checkbox"))};
 /* Zmiany innych osób nie przerywają pisania: widok odświeża się po wyjściu z pola. */
-function onData(){applyCustom(state.custom);state.plan=norm(state.rawPlan);if(!dirty)draft=null;if(typing()){pending=true;return}render()}
-document.addEventListener("focusout",()=>{if(pending)setTimeout(()=>{if(pending&&!typing()){pending=false;render()}},50)});
+let ptrDown=false,hold=0;
+/* Nie przebudowujemy widoku podczas pisania, w trakcie stuknięcia ani tuż po automatycznym zapisie (fokus właśnie przechodzi do następnego pola). */
+const quiet=()=>typing()||ptrDown||Date.now()<hold;
+function onData(){applyCustom(state.custom);state.plan=norm(state.rawPlan);if(quiet()){pending=true;flush();return}if(!dirty)draft=null;render()}
+/* Odłożone odświeżenie czeka, aż palec się podniesie: przebudowa widoku w trakcie stuknięcia gubiła kliknięcie przycisku. */
+function flush(){setTimeout(()=>{if(pending&&!quiet()){pending=false;if(!dirty)draft=null;render()}},220)}
+document.addEventListener("focusout",flush);
+document.addEventListener("pointerdown",()=>{ptrDown=true},true);
+for(const ev of ["pointerup","pointercancel"])document.addEventListener(ev,()=>{ptrDown=false;flush()},true);
 function setTab(t){tab=["plan","dziennik","zakupy","przepisy","dieta"].includes(t)?t:"plan";try{if(location.hash.slice(1)!==tab)history.replaceState(null,"","#"+tab)}catch(e){}render();window.scrollTo(0,0)}
 function render(){
   for(const b of document.querySelectorAll("nav button"))b.setAttribute("aria-selected",String(b.dataset.tab===tab));
@@ -704,13 +712,13 @@ let logDay=-1,estBusy="";
 const logDraft={};
 const isoOf=(p,i)=>{const d=dateOf(p,i);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
 const logOf=(p,i)=>{const l=state.log[isoOf(p,i)];return l&&typeof l==="object"?l:{}};
-const skipped=(L,pid,s)=>!!(L.skip&&L.skip[pid]&&L.skip[pid][s]===true);
+const ate=(L,pid,s)=>!!(L.ate&&L.ate[pid]&&L.ate[pid][s]===true);
 const snacks=(L,pid)=>Object.entries(L.extra&&typeof L.extra==="object"?L.extra:{}).filter(([,v])=>v&&typeof v==="object"&&v.pid===pid)
   .map(([id,v])=>({id,name:String(v.name||"").slice(0,60),kcal:Math.round(numIn(v.kcal,0,5000)),at:+v.at||0})).sort((a,b)=>a.at-b.at);
 /* Suma dnia dla osoby: zaplanowane posiłki, których nie odznaczono, plus dopisane rzeczy. */
 function eaten(p,i,x){
   const L=logOf(p,i),day=p.days[i];let kcal=0,b=0,t=0,w=0;
-  for(const [s] of SLOTS){const r=R[day[s]];if(!r||!eats(p,i,s,x)||skipped(L,x.id,s))continue;const f=factor(x,s,r);kcal+=r.kcal*f;
+  for(const [s] of SLOTS){const r=R[day[s]];if(!r||!eats(p,i,s,x)||!ate(L,x.id,s))continue;const f=factor(x,s,r);kcal+=r.kcal*f;
     for(const k in r.ing){const g=r.ing[k]*f/100;b+=ING[k][3]*g;t+=ING[k][4]*g;w+=ING[k][5]*g}}
   const extra=snacks(L,x.id).reduce((a,e)=>a+e.kcal,0);
   return{kcal:kcal+extra,extra,b,t,w};
@@ -740,9 +748,9 @@ function viewLog(){
       h("div",{class:"bar"+(diff<-50?" over":"")},h("i",{style:"width:"+Math.min(100,e.kcal/x.kcal*100)+"%"})),
       h("div",{class:"muted small"},(diff>50?"Zostało "+num(diff)+" kcal.":diff<-50?"Ponad cel o "+num(-diff)+" kcal.":"Cel dnia osiągnięty.")+" Z posiłków: B "+Math.round(e.b)+" g · T "+Math.round(e.t)+" g · W "+Math.round(e.w)+" g"),
       h("ul",{class:"items"},
-        SLOTS.map(([s,label])=>{const r=R[day[s]];if(!r||!eats(p,i,s,x))return null;const on=!skipped(L,x.id,s);
-          return h("li",{class:on?"":"done"},h("label",null,
-            h("input",{type:"checkbox",checked:on,disabled:!w,onchange:ev=>store.setLog(date,{skip:{[x.id]:{[s]:!ev.target.checked}}})}),
+        SLOTS.map(([s,label])=>{const r=R[day[s]];if(!r||!eats(p,i,s,x))return null;const on=ate(L,x.id,s);
+          return h("li",{class:on?"":"off"},h("label",null,
+            h("input",{type:"checkbox",checked:on,disabled:!w,onchange:ev=>store.setLog(date,{ate:{[x.id]:{[s]:ev.target.checked}}})}),
             h("span",{class:"n"},h("small",null,label),r.name),h("span",{class:"q"},Math.round(x.kcal*SLOTS.find(z=>z[0]===s)[2])+" kcal")))}),
         ex.map(it=>h("li",null,h("label",{style:"cursor:default;padding-left:30px"},h("span",{class:"n"},h("small",null,"Dopisane"),it.name),h("span",{class:"q"},"+"+it.kcal+" kcal")),
           w&&h("button",{class:"x",type:"button","aria-label":"Usuń "+it.name,onclick:()=>store.setLog(date,{extra:{[it.id]:null}})},"×")))),
@@ -760,7 +768,7 @@ function viewLog(){
     h("tfoot",null,
       h("tr",null,h("td",{class:"muted"},"Średnio na dzień"),p.people.map(x=>h("td",{class:"muted"},num(Math.round(p.days.reduce((a,_,j)=>a+eaten(p,j,x).kcal,0)/p.days.length))))),
       h("tr",null,h("td",{class:"muted"},"Cel"),p.people.map(x=>h("td",{class:"muted"},num(x.kcal))))))),
-    h("p",{class:"muted small",style:"margin:0"},"Kliknij dzień, żeby go otworzyć. Posiłki z jadłospisu liczą się jako zjedzone, dopóki ich nie odznaczysz. Dziennik obejmuje dni bieżącego jadłospisu."));
+    h("p",{class:"muted small",style:"margin:0"},"Kliknij dzień, żeby go otworzyć. Zaznacz posiłki, które zostały zjedzone: tylko one liczą się do sumy. Dziennik obejmuje dni bieżącego jadłospisu."));
   return[nav,cards,week];
 }
 function viewShop(){
@@ -805,12 +813,15 @@ function viewDiet(){
     d.nDays=clamp(Math.round(+d.nDays)||7,1,14);
     const r=buildPlan(d,state.plan,fresh);
     if(r.error){formError=r.error;return render()}
-    dirty=false;draft=null;formError="";store.setPlan(r.plan);if(fresh)store.resetChecks();
-    toast(fresh?"Ułożono nowy jadłospis":"Zapisano zmiany");setTab("plan");
+    dirty=false;formError="";if(!fresh)hold=Date.now()+200;store.setPlan(r.plan);
+    if(fresh){draft=null;store.resetChecks();toast("Ułożono nowy jadłospis");setTab("plan")}
+    else{toast("Zapisano");pending=true;flush()} /* odświeżenie dopiero po zakończeniu stuknięcia, żeby nie zabrać fokusu następnemu polu */
   };
+  /* Każda zmiana w formularzu zapisuje się sama, gdy jadłospis już istnieje. Dania pasujące do diety zostają. */
+  const commit=()=>{if(w&&state.plan&&dirty)save(false)};
   const dietChip=(key,label)=>h("label",{class:"chip"+(d.diet[key]?" on":"")},h("input",{type:"checkbox",id:"diet-"+key,checked:d.diet[key],disabled:!w,onchange:e=>{d.diet[key]=e.target.checked;touch();render()}}),label);
   const free=Object.keys(ING).filter(k=>!d.exclude.includes(k)).sort((a,b)=>ING[a][0].localeCompare(ING[b][0],"pl"));
-  return[state.app&&!state.hid&&state.fb?sharePanel():null,h("div",{class:"form"},
+  return[state.app&&!state.hid&&state.fb?sharePanel():null,h("div",{class:"form",onchange:e=>{if(!e.target.closest(".calc"))commit()}},
     h("div",null,h("h2",null,"Dieta i osoby"),h("p",{class:"muted small",style:"margin:4px 0 0"},"Każda osoba dostaje te same dania w porcji przeliczonej na swoje kalorie. Lista zakupów sumuje wszystkich.")),
     h("div",{class:"field"},h("span",null,"Kto je i ile kalorii dziennie"),
       d.people.map((x,i)=>[h("div",{class:"person"},
@@ -818,16 +829,16 @@ function viewDiet(){
         h("input",{type:"number",id:"p-kcal-"+i,value:x.kcal,min:1000,max:5000,step:50,disabled:!w,"aria-label":"Kalorie dziennie",oninput:e=>{x.kcal=e.target.value;touch()}}),
         h("span",{class:"muted small"},"kcal"),
         w&&h("button",{class:"btn small",type:"button",onclick:()=>{calcIdx=calcIdx===i?-1:i;render()}},"Policz"),
-        w&&d.people.length>1&&h("button",{class:"x",type:"button","aria-label":"Usuń osobę",onclick:()=>{d.people.splice(i,1);calcIdx=-1;touch();render()}},"×")),
-        calcIdx===i&&w?calcPanel(x,touch):null,
+        w&&d.people.length>1&&h("button",{class:"x",type:"button","aria-label":"Usuń osobę",onclick:()=>{d.people.splice(i,1);calcIdx=-1;touch();render();commit()}},"×")),
+        calcIdx===i&&w?calcPanel(x,()=>{touch();setTimeout(commit,0)}):null,
         h("div",{class:"checks"},h("span",{class:"muted small",style:"align-self:center"},"Je w domu:"),
           SLOTS.map(([s,l])=>h("label",{class:"chip sm"+(x.eats[s]?" on":"")},h("input",{type:"checkbox",id:"p-eat-"+i+s,checked:x.eats[s],disabled:!w,onchange:e=>{x.eats[s]=e.target.checked;touch();render()}}),l)),
           SLOTS.some(([s])=>!x.eats[s])&&h("label",{class:"chip sm"+(x.wd?" on":"")},h("input",{type:"checkbox",id:"p-wd-"+i,checked:x.wd,disabled:!w,onchange:e=>{x.wd=e.target.checked;touch();render()}}),"Tylko pon–pt, w weekend je wszystko"))]),
-      w&&d.people.length<8&&h("div",null,h("button",{class:"btn small",type:"button",onclick:()=>{d.people.push(mkPerson("Osoba "+(d.people.length+1),2000));touch();render()}},"Dodaj osobę")),
+      w&&d.people.length<8&&h("div",null,h("button",{class:"btn small",type:"button",onclick:()=>{d.people.push(mkPerson("Osoba "+(d.people.length+1),2000));touch();render();commit()}},"Dodaj osobę")),
       h("span",{class:"muted small"},"Nie znasz swojego zapotrzebowania? Kliknij „Policz” przy osobie. Odznacz posiłek, którego ktoś zwykle nie je w domu (np. obiad w szkole). Na konkretny dzień zmienisz to w jadłospisie, w polu „Kto je”.")),
     h("div",{class:"field"},h("span",null,"Rodzaj diety"),h("div",{class:"checks"},dietChip("noMeat","Bez mięsa i ryb"),dietChip("noGluten","Bez glutenu"),dietChip("noLactose","Bez laktozy"))),
     h("div",{class:"field"},h("span",null,"Wykluczone produkty"),
-      d.exclude.length?h("div",{class:"checks"},d.exclude.map(k=>h("span",{class:"chip on"},ING[k][0],w&&h("button",{type:"button","aria-label":"Przywróć "+ING[k][0],onclick:()=>{d.exclude=d.exclude.filter(z=>z!==k);touch();render()}},"×")))):null,
+      d.exclude.length?h("div",{class:"checks"},d.exclude.map(k=>h("span",{class:"chip on"},ING[k][0],w&&h("button",{type:"button","aria-label":"Przywróć "+ING[k][0],onclick:()=>{d.exclude=d.exclude.filter(z=>z!==k);touch();render();commit()}},"×")))):null,
       h("select",{id:"exclude-add",disabled:!w,"aria-label":"Wyklucz produkt",onchange:e=>{if(e.target.value){d.exclude.push(e.target.value);touch();render()}}},
         h("option",{value:""},"Wybierz produkt, którego nie jecie…"),free.map(k=>h("option",{value:k},ING[k][0])))),
     h("div",{class:"row"},
@@ -836,9 +847,9 @@ function viewDiet(){
       h("label",{class:"field"},h("span",null,"Liczba dni"),h("input",{type:"number",id:"n-days",value:d.nDays,min:1,max:14,disabled:!w,oninput:e=>{d.nDays=e.target.value;touch()}})),
       h("label",{class:"field"},h("span",null,"Pierwszy dzień"),h("input",{type:"date",id:"start",value:d.start,disabled:!w,oninput:e=>{if(e.target.value){d.start=e.target.value;touch()}}}))),
     formError&&h("div",{class:"note"},formError),
+    w&&state.plan&&h("p",{class:"muted small",style:"margin:0"},"Zmiany zapisują się same. Dania, które nadal pasują do diety, zostają w jadłospisie."),
     w&&h("div",{class:"row"},
-      h("button",{class:"btn primary",type:"button",onclick:()=>save(true)},"Ułóż nowy jadłospis"),
-      state.plan&&h("button",{class:"btn",type:"button",onclick:()=>save(false)},"Zapisz, zostaw pasujące dania"))),
+      h("button",{class:"btn"+(state.plan?"":" primary"),type:"button",onclick:()=>save(true)},state.plan?"Ułóż cały jadłospis od nowa":"Ułóż jadłospis"))),
     state.app&&(state.hid||!state.fb)?sharePanel():null,state.app?aiKeyPanel():null];
 }
 /* Kalkulator zapotrzebowania: wzór Mifflina-St Jeora razy aktywność, plus albo minus cel. */
